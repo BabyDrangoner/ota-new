@@ -1,0 +1,63 @@
+# ===========================
+# Build / Binary Artifacts
+# ===========================
+build/
+bin/
+lib/
+lib64/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# ===========================
+# IDE / Editor Settings
+# ===========================
+.vscode/
+.idea/
+*.user
+*.workspace
+*.code-workspace
+
+# ===========================
+# Compiled Object Files
+# ===========================
+*.o
+*.obj
+*.so
+*.a
+*.out
+*.log
+*.tmp
+*.swp
+*.swo
+
+# ===========================
+# Python / Script Cache
+# ===========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ===========================
+# System Files
+# ===========================
+.DS_Store
+Thumbs.db
+
+# ===========================
+# Local Environment Configs
+# ===========================
+.env
+*.local
+
+# ===========================
+# Temporary Test / Debug Output
+# ===========================
+*.bak
+*.old
+*.orig
+*.core
+*.trace
+*.dmp

@@ -1,0 +1,627 @@
+#include "sherry.h"
+#include "ota_manager.h"
+#include "../include/json/json.hpp"
+#include "util.h"
+#include "http/http_util.h"
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+namespace sherry{
+
+static Logger::ptr g_logger = SYLAR_LOG_NAME("system");
+
+static OTAManager* t_otaMgr = nullptr;
+
+struct FileDetail{
+    size_t size;
+    std::string MD5;
+};
+
+OTAManager::OTAManager(size_t buffer_size, const std::string& protocol
+                       , const std::string& host, int port
+                       , const std::string& file_prev_path, IOManager::ptr io_mgr)
+    :m_protocol(protocol)
+    ,m_host(host)
+    ,m_port(port)
+    ,m_file_prev_path(file_prev_path)
+    ,m_buffer_size(buffer_size){
+    m_timer_mgr = io_mgr;
+    m_device_types_counts = 0;
+    m_device_counts = 0;
+    m_callback_mgr = std::make_shared<OTAClientCallbackManager>();
+    m_client_mgr = std::make_shared<MqttClientManager>(m_port, m_protocol, m_host, m_callback_mgr);
+
+    m_device_type_nums.clear();
+    m_ota_notifier_map.clear();
+    // g_logger->setLevel(LogLevel::Level::ERROR);
+
+    SetThis();
+}
+
+OTAManager* OTAManager::GetThis(){
+    SYLAR_LOG_DEBUG(g_logger) << "OTAManager::GetThis()";
+    return t_otaMgr;
+}
+
+void OTAManager::SetThis(){
+    t_otaMgr = this;
+}
+
+bool OTAManager::add_device(uint16_t device_type, uint32_t device_no){
+    RWMutexType::WriteLock lock(m_mutex);
+    auto it = m_device_type_nums.find(device_type);
+    if(it == m_device_type_nums.end()){
+        ++m_device_types_counts;
+        ++m_device_counts;
+        m_device_type_nums[device_type].insert(device_no);
+        SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
+                                 << ", device no = " << device_no
+                                 << " success add.";
+        return true;
+    } 
+
+    auto itt = (*it).second.find(device_no);
+    if(itt == (*it).second.end()){
+        ++m_device_counts;
+        (*it).second.insert(device_no);
+        SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
+                                 << ", device no = " << device_no
+                                 << " has been added successfully.";
+        return true;
+    }
+
+    SYLAR_LOG_WARN(g_logger) << "device type = " << device_type
+                                 << ", device no = " << device_no
+                                 << " has been already added.";
+    return false;
+}
+
+bool OTAManager::remove_device(uint16_t device_type, uint32_t device_no){
+    {
+        RWMutexType::ReadLock lock(m_mutex);
+        auto it = m_device_type_nums.find(device_type);
+        if(it == m_device_type_nums.end()){
+            SYLAR_LOG_WARN(g_logger) << "device type = " << device_type
+                                    << ", device no = " << device_no
+                                    << " has not been added.";
+            return false;
+        } 
+
+        auto itt = (*it).second.find(device_no);
+        if(itt == (*it).second.end()){
+            ++m_device_counts;
+            (*it).second.insert(device_no);
+            SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
+                                    << ", device no = " << device_no
+                                    << " has not been added.";
+            return false;
+        }
+    }
+
+    RWMutexType::WriteLock lock(m_mutex);
+    m_device_type_nums[device_type].erase(device_no);
+    --m_device_counts;
+    if(m_device_type_nums[device_type].size() == 0){
+        m_device_type_nums.erase(device_type);
+        --m_device_types_counts;
+        
+        SYLAR_LOG_DEBUG(g_logger) << "其他功能写完记得补充";
+    }
+
+    SYLAR_LOG_WARN(g_logger) << "device type = " << device_type
+                                 << ", device no = " << device_no
+                                 << " has been removed successfully.";
+    return true;
+}
+
+void OTAManager::ota_notify(uint64_t device_type
+                            , const std::string& name
+                            , const std::string& version
+                            , http::HttpResponse::ptr rsp){
+    
+    struct OTAMessage msg;
+    if(!get_notify_message(device_type, name, version, msg)){
+        
+        std::stringstream ss;
+        ss << "device_type = " << device_type
+                                << ", name = " << name
+                                << ", version = " << version
+                                << " get notify message error";
+        
+        std::string sstr = ss.str();
+        SYLAR_LOG_WARN(g_logger) << sstr;
+        
+        nlohmann::json j;
+        j["msg"] = std::move(sstr);
+        
+        rsp->setBody(j.dump());
+        rsp->setStatus(http::HttpStatus::NOT_FOUND);
+        
+        return;
+    }
+    const std::string type = "notify";
+
+    nlohmann::json j;
+    j["msg"] = "notify task submitted.";
+    rsp->setBody(j.dump());
+    rsp->setStatus(http::HttpStatus::OK);
+
+    // std::stringstream ss;
+    // ss << "/ota/" << device_type
+    //    << "/" << name 
+    //    << "/" << version
+    //    << "/notify";
+
+    // std::string topic = std::move(ss.str());
+
+    // {
+    //     RWMutexType::ReadLock lock(m_notifier_mutex);
+    //     SYLAR_LOG_DEBUG(g_logger) << "m_nofier_read_lock";        
+    //     auto it = m_ota_notifier_map.find(topic);
+    //     if(it != m_ota_notifier_map.end()){
+    //         OTANotifier::ptr notifier = (*it).second;
+    //         notifier->set_message(msg);
+    //         SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
+    //                                  << " start to notify.";
+    //         notifier->start();
+    //         SYLAR_LOG_DEBUG(g_logger) << "m_nofier_read_unlock";
+    //         return;
+    //     }
+    //     SYLAR_LOG_DEBUG(g_logger) << "m_nofier_read_unlock";
+
+    // }
+
+
+    // RWMutexType::WriteLock lock(m_notifier_mutex);
+    // SYLAR_LOG_DEBUG(g_logger) << "m_nofier_write_lock";
+
+    // OTANotifier::ptr notifier = std::make_shared<OTANotifier>(device_type, m_timer_mgr, topic, m_client_mgr, 1000);
+    // m_ota_notifier_map[topic] = notifier;
+    // SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
+    //                                  << " start to notify.";
+    // notifier->set_message(msg);
+    // notifier->start();
+    // SYLAR_LOG_DEBUG(g_logger) << "m_nofier_write_unlock";
+
+}
+
+void OTAManager::ota_stop_notify(uint16_t device_type
+                                , const std::string& name
+                                , const std::string& version
+                                , http::HttpResponse::ptr rsp){
+    const std::string type = "stop_notify";
+
+    std::stringstream ss;
+    ss << "/ota/" << device_type
+       << "/" << name 
+       << "/" << version
+       << "/notify";
+
+    std::string topic = ss.str();
+
+    RWMutexType::ReadLock lock(m_notifier_mutex);
+    auto it = m_ota_notifier_map.find(topic);
+    if(it == m_ota_notifier_map.end()){
+        
+        std::stringstream ss;
+        ss << "device_type = " << device_type
+           << " notifier has not existed.";
+        std::string sstr = ss.str(); 
+        
+        SYLAR_LOG_WARN(g_logger) << sstr;
+        
+        nlohmann::json j;
+        j["msg"] = std::move(sstr);
+
+        rsp->setBody(j.dump());
+        rsp->setStatus(http::HttpStatus::NOT_FOUND);
+        
+        return;
+    }
+
+    (*it).second->stop();
+    
+    ss.clear();
+    ss << "device_type = " << device_type
+       << ", name = " << name
+       << ", version = " << version
+       << " notifier has been stopped.";
+    
+    std::string sstr = ss.str(); 
+    SYLAR_LOG_INFO(g_logger) << sstr;
+
+    nlohmann::json j;
+    j["msg"] = std::move(sstr);
+    rsp->setBody(j.dump());
+    rsp->setStatus(http::HttpStatus::OK);
+}
+
+void OTAManager::ota_query(uint16_t device_type
+                           , uint32_t device_no
+                           , const std::string& action
+                           , http::HttpResponse::ptr rsp){
+    const std::string type = "query";
+    std::stringstream pub_stream, sub_stream;
+    pub_stream = FormatOtaPrex(device_type, device_no);
+    sub_stream = FormatOtaPrex(device_type, device_no);
+
+    pub_stream << "/query";
+    sub_stream << "/responder";
+
+    std::string pub_topic = pub_stream.str();
+    std::string sub_topic = sub_stream.str();
+
+    sherry::Fiber::ptr thisFiber = Fiber::GetThis();
+    sherry::IOManager* ioMgr = IOManager::GetThis();
+
+    OTAQueryResponder::ptr oqr = std::make_shared<OTAQueryResponder>(device_type, device_no, m_client_mgr);
+    m_callback_mgr->regist_callback(sub_topic
+                                    ,[this, oqr, pub_topic, device_type, device_no, action, type, thisFiber, rsp, ioMgr]
+                                    (const std::string& topic, const std::string& payload){
+
+        oqr->subscribe_on_success(pub_topic, topic);
+        try{
+            SYLAR_LOG_DEBUG(g_logger) << payload;
+
+            nlohmann::json json_response = nlohmann::json::parse(payload);
+            if(!json_response.contains("query_details") 
+                      || !json_response.contains("device_type")
+                      || !json_response.contains("device_no")){
+                SYLAR_LOG_WARN(g_logger) << "Query device:" << device_type
+                                         << "/" << device_no 
+                                         << " details is not satisfied.";
+                return;
+            }
+            
+            if(!json_response["query_details"].contains("action") || json_response["query_details"]["action"] != action){
+                SYLAR_LOG_WARN(g_logger) << "Query device:" << device_type
+                                          << "/" << device_no
+                                          << " response action: " << json_response["action"]
+                                          << " is not same with query action: " << action;
+                return;
+            } 
+            if(json_response["device_type"] != device_type){
+                SYLAR_LOG_WARN(g_logger) << "Query device:" << device_type
+                                          << "/" << device_no
+                                          << " response device_type: " << json_response["device_type"]
+                                          << " is not same with query device_type: " << device_type;
+                return;
+            } 
+            if(json_response["device_no"] != device_no){
+                SYLAR_LOG_WARN(g_logger) << "Query device:" << device_type
+                                          << "/" << device_no
+                                          << " response device_no: " << json_response["device_no"]
+                                          << " is not same with query device_no: " << device_no;
+                return;
+            }
+
+            rsp->setBody(json_response.dump());
+            rsp->setStatus(http::HttpStatus::OK);
+
+            while(true){
+                Fiber::State st = thisFiber->getState();
+                if(st == Fiber::State::HOLD) break;
+                else if(st == Fiber::State::EXCEPT || st == Fiber::State::TERM) return;
+            }
+
+            if(ioMgr){
+                ioMgr->schedule(thisFiber);
+            }else{
+                setServerError(rsp);
+            }
+            
+        } catch(const std::exception& e){
+            nlohmann::json json_response;
+            
+            std::stringstream ss;
+
+            ss << "Query device:" << device_type
+               << "/" << device_no 
+               << "error, error is " << e.what();
+
+            std::string str = ss.str();
+
+            json_response["msg"] = std::move(str);
+
+            rsp->setBody(json_response.dump());
+            rsp->setStatus(http::HttpStatus::OK);
+
+            while(true){
+                Fiber::State st = thisFiber->getState();
+                if(st == Fiber::State::HOLD) break;
+                else if(st == Fiber::State::EXCEPT || st == Fiber::State::TERM) return;
+            }
+
+            if(ioMgr){
+                ioMgr->schedule(thisFiber);
+            }else{
+                setServerError(rsp);
+            }
+            return;
+        }
+        
+    });
+    oqr->publish_query(action, 1, true);
+    oqr->subscribe_responder(pub_topic, sub_topic, 1);
+
+    Fiber::YieldToHold();
+
+}
+
+void OTAManager::ota_query_download(uint16_t device_type
+                                    , uint32_t device_no
+                                    , const std::string& name
+                                    , http::HttpResponse::ptr rsp){
+    const std::string type = "query_download";
+
+    std::stringstream ss;
+    ss << "/ota/" << device_type
+            << "/" << device_no 
+            << "/" << name
+            << "/query_download";
+
+    std::string topic = ss.str();
+
+    sherry::Fiber::ptr thisFiber = Fiber::GetThis();
+    sherry::IOManager* ioMgr = IOManager::GetThis();
+
+    m_callback_mgr->regist_callback(topic, [this, device_type, device_no, name, type, thisFiber, rsp, ioMgr]
+                                    (const std::string& topic, const std::string& payload){
+
+        try{
+            SYLAR_LOG_DEBUG(g_logger) << payload;
+
+            nlohmann::json json_response = nlohmann::json::parse(payload);
+            if(!json_response.contains("name") 
+                      || !json_response.contains("device_type")
+                      || !json_response.contains("device_no")){
+                SYLAR_LOG_WARN(g_logger) << "Query device:" << device_type
+                                         << "/" << device_no 
+                                         << " details is not satisfied.";
+                return;
+            }
+            
+            if(json_response["name"] != name){
+                SYLAR_LOG_WARN(g_logger) << "Query device:" << device_type
+                                          << "/" << device_no
+                                          << " response name: " << json_response["name"]
+                                          << " is not same with query action: " << name;
+                return;
+            } 
+
+            if(json_response["device_type"] != device_type){
+                SYLAR_LOG_WARN(g_logger) << "Query device:" << device_type
+                                          << "/" << device_no
+                                          << " response device_type: " << json_response["device_type"]
+                                          << " is not same with query device_type: " << device_type;
+                return;
+            } 
+
+            if(json_response["device_no"] != device_no){
+                SYLAR_LOG_WARN(g_logger) << "Query device:" << device_type
+                                          << "/" << device_no
+                                          << " response device_no: " << json_response["device_no"]
+                                          << " is not same with query device_no: " << device_no;
+                return;
+            }
+
+            rsp->setBody(json_response.dump());
+            rsp->setStatus(http::HttpStatus::OK);
+
+            while(true){
+                Fiber::State st = thisFiber->getState();
+                if(st == Fiber::State::HOLD) break;
+                else if(st == Fiber::State::EXCEPT || st == Fiber::State::TERM) return;
+            }
+
+            if(ioMgr){
+                ioMgr->schedule(thisFiber);
+            }else{
+                setServerError(rsp);
+            }
+
+        } catch(const std::exception& e){
+            nlohmann::json json_response;
+            
+            std::stringstream ss;
+
+            ss << "Query device:" << device_type
+               << "/" << device_no 
+               << "error, error is " << e.what();
+
+            std::string str = ss.str();
+
+            json_response["msg"] = std::move(str);
+
+            rsp->setBody(json_response.dump());
+            rsp->setStatus(http::HttpStatus::OK);
+
+            while(true){
+                Fiber::State st = thisFiber->getState();
+                if(st == Fiber::State::HOLD) break;
+                else if(st == Fiber::State::EXCEPT || st == Fiber::State::TERM) return;
+            }
+
+            if(ioMgr){
+                ioMgr->schedule(thisFiber);
+            }else{
+                setServerError(rsp);
+            }
+
+            return;
+        }
+        
+    });
+
+    {
+        RWMutexType::ReadLock lock(m_mutex);
+        auto it = m_ota_subscribe_download_map.find(device_type);
+        if(it != m_ota_subscribe_download_map.end()){
+            auto itt = (*it).second.find(device_no);
+            if(itt != (*it).second.end()){
+                (*itt).second->subscribe_download(topic);
+                SYLAR_LOG_INFO(g_logger) << "device_type = " << device_type
+                                         << ", device_no = " << device_no
+                                         << ", name = " << name
+                                         << " start to subscribe download detail.";
+                return;
+            }
+        }
+    }
+
+    OTASubscribeDownload::ptr ota_sd = nullptr;
+    {
+        RWMutexType::WriteLock lock(m_mutex);
+        ota_sd = std::make_shared<OTASubscribeDownload>(topic, device_type, device_no, m_client_mgr, m_callback_mgr);
+        m_ota_subscribe_download_map[device_type][device_no] = ota_sd;
+    }
+    ota_sd->subscribe_download(topic);
+    SYLAR_LOG_INFO(g_logger) << "device_type = " << device_type
+                             << ", device_no = " << device_no
+                             << ", name = " << name
+                             << " start to subscribe download detail.";
+    Fiber::YieldToHold();
+
+}
+
+void OTAManager::ota_file_download(uint16_t device_type
+                                  , const std::string& name
+                                  , const std::string& version
+                                  , http::HttpResponse::ptr rsp
+                                  , http::HttpSession::ptr session){
+    const std::string type = "file_download";
+
+    std::string file_name = "ota_" 
+                            + std::to_string(device_type) 
+                            + "_" + version 
+                            + "_" + name + ".jpg";
+    std::string file_path = m_file_prev_path + file_name;
+
+    struct FileDetail file_detail;
+    int fd = getFileDetail(file_path, file_detail);
+    if(fd < 0){
+        rsp->setStatus(http::HttpStatus::NOT_FOUND);
+        rsp->setBody("no file.");
+        return;
+    }
+
+    size_t file_size = file_detail.size;
+
+    rsp->setIsSending(true);
+    rsp->setStatus(http::HttpStatus::OK);
+    rsp->setHeader("Content-Length", std::to_string(file_size));
+    rsp->setHeader("X-Content-MD5", file_detail.MD5);
+    rsp->setHeader("Content-Disposition", "attachment; filename=" + file_name);
+    rsp->setHeader("Content-Type", "image/jpeg");
+    rsp->setClose(true);
+
+    sherry::Fiber::ptr thisFiber = Fiber::GetThis();
+    sherry::IOManager* ioMgr = IOManager::GetThis();
+
+    off_t offset = 0;
+
+    int sockfd = session->getSocket()->getSocket();
+    ioMgr->addEvent(sockfd, IOManager::Event::WRITE, [fd, thisFiber, file_size, offset, session, rsp](){
+        while(rsp->isSending()){}
+        rsp->setIsSending(false);
+        sendFile(fd, thisFiber, offset, file_size, session);
+    });
+
+}
+
+int OTAManager::send_file(int fd, off_t* offset, size_t file_size, http::HttpSession::ptr session){
+    return session->sendfile(fd, offset, file_size);
+}
+
+void OTAManager::sendFile(int fd, Fiber::ptr thisFiber, off_t offset, size_t file_size, http::HttpSession::ptr session){
+
+    int rt = send_file(fd, &offset, file_size, session);
+    SYLAR_LOG_DEBUG(g_logger) << "sendFile file_size: " << file_size;
+
+    if(rt == -1){
+        SYLAR_LOG_WARN(g_logger) << "sendfile error: " << strerror(errno);
+        return;
+    }
+
+    file_size -= rt;
+
+    if(file_size == 0){
+        IOManager::GetThis()->schedule(thisFiber);
+        SYLAR_LOG_DEBUG(g_logger) << "sendFile return";
+        return;
+    }
+
+    int sockfd = session->getSocket()->getSocket();
+    IOManager::GetThis()->addEvent(sockfd, IOManager::Event::WRITE, [fd, thisFiber, file_size, offset, session](){
+        sendFile(fd, thisFiber, offset, file_size, session);
+    });
+
+}
+
+int OTAManager::getFileDetail(const std::string& file_path, struct FileDetail& file_detail){
+
+    int file_fd = open(file_path.c_str(), O_RDONLY);
+    if(file_fd < 0){
+        SYLAR_LOG_WARN(g_logger) << "open file: " << file_path 
+                                 << " failed, error = " << strerror(errno);
+        return -1;
+    }
+    struct stat st;
+    if (fstat(file_fd, &st) != 0) {
+        close(file_fd);
+        return -1;
+    }
+
+    file_detail.size = st.st_size;
+    file_detail.MD5 = "ed076287532e86365e841e92bfc50d8c";
+
+    return file_fd;
+}
+
+
+bool OTAManager::get_notify_message(uint16_t device_type, const std::string& name, const std::string& version, struct OTAMessage& msg){
+    
+    msg.name = name;
+    msg.version = version;
+    msg.time = getCurrentTimeString();
+    msg.file_name = "agsspds_20241110.zip";
+    msg.file_size = 6773120;
+    msg.url_path = "http://127.0.0.1:18882/download/ota/agsspds";
+    msg.md5_value = "ed076287532e86365e841e92bfc50d8c";
+    msg.launch_mode = 0;
+    msg.upgrade_mode = 1;
+
+    return true;
+
+}
+
+bool OTAManager::check_device(uint16_t device_type, uint32_t device_no){
+    RWMutexType::ReadLock lock(m_mutex);
+    auto it = m_device_type_nums.find(device_type);
+    if(it == m_device_type_nums.end()){
+        return false;
+    }
+
+    auto itt = (*it).second.find(device_no);
+    if(itt == (*it).second.end()){
+        return false;
+    }
+
+    return true;
+}
+
+bool OTAManager::check_device(uint16_t device_type){
+    RWMutexType::ReadLock lock(m_mutex);
+    auto it = m_device_type_nums.find(device_type);
+    if(it == m_device_type_nums.end()){
+        return false;
+    }
+
+    return true;
+}
+
+
+
+}

@@ -1,0 +1,26 @@
+mosquitto_pub -h localhost -p 1883 -t "/ota/1/1/responder" -m '{
+"device_type": 1,
+"device_no": 1,
+"name": "main_board",
+"download_details": {
+"version": "v1.2.3",
+"checksum": "abc123",
+"url": "[http://example.com/firmware.bin](http://example.com/firmware.bin)"
+},
+"query_details": {
+"action":"getVersion",
+"status": "idle",
+"uptime": 45600,
+"last_check": "2025-05-02T16:30:00Z"
+}
+}'
+mosquitto_pub -h localhost -p 1883 -t "/ota/1/1/gps/query_download" -m '{
+"device_type": 1,
+"device_no": 1,
+"name": "gps",
+"version": "1.0.2", 
+"url": "http://yourserver.com/firmware.bin",
+"size": 1048576,
+"process": 1.00,
+"download_status": "down"
+}'
