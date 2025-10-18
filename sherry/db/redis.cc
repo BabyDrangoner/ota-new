@@ -90,7 +90,13 @@ bool Redis::connect(const std::string& ip, int port, uint64_t ms) {
     }
     timeval tv = {(int)ms / 1000, (int)ms % 1000 * 1000};
     auto c = redisConnectWithTimeout(ip.c_str(), port, tv);
+
     if(c) {
+        if(c->err){
+            SYLAR_LOG_ERROR(g_logger) << "c error: "
+                    << c->err;
+            return false;
+        }
         if(m_cmdTimeout.tv_sec || m_cmdTimeout.tv_usec) {
             setTimeout(m_cmdTimeout.tv_sec * 1000 + m_cmdTimeout.tv_usec / 1000);
         }
@@ -125,6 +131,8 @@ bool Redis::connect(const std::string& ip, int port, uint64_t ms) {
     }
     return false;
 }
+
+
 
 bool Redis::setTimeout(uint64_t v) {
     m_cmdTimeout.tv_sec = v / 1000;

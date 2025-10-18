@@ -2,7 +2,7 @@
 #define __SHERRY_DB_REDIS_H__
 
 #include <stdlib.h>
-#include <hiredis-vip/hiredis.h>
+#include <hiredis/hiredis.h>
 #include <hiredis-vip/hircluster.h>
 #include <hiredis-vip/adapters/libevent.h>
 #include <sys/time.h>
