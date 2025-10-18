@@ -1,5 +1,5 @@
-#ifndef __SYLAR_SYLAR_H__
-#define __SYLAR_SYLAR_H__
+#ifndef __SHERRY_SHERRY_H__
+#define __SHERRY_SHERRY_H__
 
 #include "config.h"
 #include "log.h"
