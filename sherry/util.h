@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include <vector>
 #include <string>
+#include <boost/lexical_cast.hpp>
+
 
 namespace sherry{
 
@@ -97,6 +99,33 @@ public:
         return __sync_bool_compare_and_swap(&t, (T)old_val, (T)new_val);
     }
 };
+
+template<class V, class Map, class K>
+V GetParamValue(const Map& m, const K& k, const V& def = V()) {
+    auto it = m.find(k);
+    if(it == m.end()) {
+        return def;
+    }
+    try {
+        return boost::lexical_cast<V>(it->second);
+    } catch (...) {
+    }
+    return def;
+}
+
+template<class V, class Map, class K>
+bool CheckGetParamValue(const Map& m, const K& k, V& v) {
+    auto it = m.find(k);
+    if(it == m.end()) {
+        return false;
+    }
+    try {
+        v = boost::lexical_cast<V>(it->second);
+        return true;
+    } catch (...) {
+    }
+    return false;
+}
 
 }
 
