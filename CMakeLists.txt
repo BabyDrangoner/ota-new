@@ -62,11 +62,20 @@ set(LIB_SRC
     sherry/http/http_session.cc
     sherry/http/http_server.cc
     sherry/http/servlet.cc
+
+    sherry/util/hash_util.cc
+    sherry/db/fox_thread.cc
+    sherry/db/redis.cc
     
 )
 
 add_library(sherry SHARED ${LIB_SRC})
 force_redefine_file_macro_for_sources(sherry)  #__FILE__
+
+find_library(EVENT_LIB NAMES event)
+
+find_library(HIREDIS_LIB NAMES hiredis PATHS /usr/local/lib /usr/lib/x86_64-linux-gnu)
+find_library(HIREDIS_VIP_LIB NAMES hiredis_vip)
 
 # 定义链接库列表
 set(LIBS
@@ -79,6 +88,9 @@ set(LIBS
     ${PAHO_MQTT3AS}
     ${SSL_LIB}
     ${CRYPTO_LIB}
+    ${EVENT_LIB}
+    ${HIREDIS_LIB}
+    ${HIREDIS_VIP_LIB} 
 )
 
 message("***", ${LIBS})
