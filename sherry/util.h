@@ -137,6 +137,9 @@ bool CheckGetParamValue(const Map& m, const K& k, V& v) {
     return false;
 }
 
+template<class T>
+void nop(T*) {}
+
 }
 
 #endif
