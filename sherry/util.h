@@ -27,6 +27,16 @@ uint64_t GetCurrentUS();
 
 std::stringstream FormatOtaPrex(uint16_t device_type, uint32_t device_no=0);
 
+class TypeUtil {
+public:
+    static int8_t ToChar(const std::string& str);
+    static int64_t Atoi(const std::string& str);
+    static double Atof(const std::string& str);
+    static int8_t ToChar(const char* str);
+    static int64_t Atoi(const char* str);
+    static double Atof(const char* str);
+};
+
 class Atomic {
 public:
     template<class T, class S = T>
