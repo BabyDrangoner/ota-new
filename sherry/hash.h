@@ -1,0 +1,38 @@
+#ifndef _SHERRY_HASH_
+#define _SHERRY_HASH_
+
+#include <string>
+#include <sstream>
+#include <chrono>
+
+#include "util.h"
+
+namespace sherry{
+
+class OTAHash{
+public:
+
+    static std::string get_device_group_hash(uint16_t group_id){
+        std::stringstream ss;
+        ss << ota_redis_key_prefix << group_id;
+        return ss.str();
+    }
+
+    static std::string get_device_id_hash(uint16_t group_id, uint32_t device_id){
+        std::stringstream ss;
+        ss << ota_redis_key_prefix << group_id << ":" << device_id;
+        return ss.str();
+    }
+
+    static std::string get_device_group_id_timestamp(uint16_t group_id, uint32_t device_id){
+        std::stringstream ss;
+        ss << ota_redis_key_prefix << group_id << ":" << device_id << ":" << GetCurrentUS();
+        return ss.str();
+    }
+
+private:
+    static constexpr const char* ota_redis_key_prefix = "ota:device:";
+};
+
+}  // namespace sherry
+#endif
