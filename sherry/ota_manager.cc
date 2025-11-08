@@ -148,42 +148,42 @@ void OTAManager::ota_notify(uint64_t device_type
     rsp->setBody(j.dump());
     rsp->setStatus(http::HttpStatus::OK);
 
-    // std::stringstream ss;
-    // ss << "/ota/" << device_type
-    //    << "/" << name 
-    //    << "/" << version
-    //    << "/notify";
+    std::stringstream ss;
+    ss << "/ota/" << device_type
+       << "/" << name 
+       << "/" << version
+       << "/notify";
 
-    // std::string topic = std::move(ss.str());
+    std::string topic = ss.str();
 
-    // {
-    //     RWMutexType::ReadLock lock(m_notifier_mutex);
-    //     SYLAR_LOG_DEBUG(g_logger) << "m_nofier_read_lock";        
-    //     auto it = m_ota_notifier_map.find(topic);
-    //     if(it != m_ota_notifier_map.end()){
-    //         OTANotifier::ptr notifier = (*it).second;
-    //         notifier->set_message(msg);
-    //         SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
-    //                                  << " start to notify.";
-    //         notifier->start();
-    //         SYLAR_LOG_DEBUG(g_logger) << "m_nofier_read_unlock";
-    //         return;
-    //     }
-    //     SYLAR_LOG_DEBUG(g_logger) << "m_nofier_read_unlock";
+    {
+        RWMutexType::ReadLock lock(m_notifier_mutex);
+        SYLAR_LOG_DEBUG(g_logger) << "m_nofier_read_lock";        
+        auto it = m_ota_notifier_map.find(topic);
+        if(it != m_ota_notifier_map.end()){
+            OTANotifier::ptr notifier = (*it).second;
+            notifier->set_message(msg);
+            SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
+                                     << " start to notify.";
+            notifier->start();
+            SYLAR_LOG_DEBUG(g_logger) << "m_nofier_read_unlock";
+            return;
+        }
+        SYLAR_LOG_DEBUG(g_logger) << "m_nofier_read_unlock";
 
-    // }
+    }
 
 
-    // RWMutexType::WriteLock lock(m_notifier_mutex);
-    // SYLAR_LOG_DEBUG(g_logger) << "m_nofier_write_lock";
+    RWMutexType::WriteLock lock(m_notifier_mutex);
+    SYLAR_LOG_DEBUG(g_logger) << "m_nofier_write_lock";
 
-    // OTANotifier::ptr notifier = std::make_shared<OTANotifier>(device_type, m_timer_mgr, topic, m_client_mgr, 1000);
-    // m_ota_notifier_map[topic] = notifier;
-    // SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
-    //                                  << " start to notify.";
-    // notifier->set_message(msg);
-    // notifier->start();
-    // SYLAR_LOG_DEBUG(g_logger) << "m_nofier_write_unlock";
+    OTANotifier::ptr notifier = std::make_shared<OTANotifier>(device_type, m_timer_mgr, topic, m_client_mgr, 1000);
+    m_ota_notifier_map[topic] = notifier;
+    SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
+                                     << " start to notify.";
+    notifier->set_message(msg);
+    notifier->start();
+    SYLAR_LOG_DEBUG(g_logger) << "m_nofier_write_unlock";
 
 }
 
