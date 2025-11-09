@@ -1,7 +1,6 @@
 #include "redis.h"
 #include "sherry/sherry.h"
 #include "sherry/log.h"
-#include "sherry/util/hash_util.h"
 
 namespace sherry {
 
@@ -90,13 +89,7 @@ bool Redis::connect(const std::string& ip, int port, uint64_t ms) {
     }
     timeval tv = {(int)ms / 1000, (int)ms % 1000 * 1000};
     auto c = redisConnectWithTimeout(ip.c_str(), port, tv);
-
     if(c) {
-        if(c->err){
-            SYLAR_LOG_ERROR(g_logger) << "c error: "
-                    << c->err;
-            return false;
-        }
         m_context.reset(c, redisFree);
 
         if(m_cmdTimeout.tv_sec || m_cmdTimeout.tv_usec) {
@@ -132,8 +125,6 @@ bool Redis::connect(const std::string& ip, int port, uint64_t ms) {
     }
     return false;
 }
-
-
 
 bool Redis::setTimeout(uint64_t v) {
     m_cmdTimeout.tv_sec = v / 1000;
@@ -1228,6 +1219,7 @@ void RedisManager::init() {
                 sherry::Redis* rds(new sherry::Redis(i.second));
                 rds->connect();
                 rds->setLastActiveTime(time(0));
+                rds->setName(i.first);
                 sherry::RWMutex::WriteLock lock(m_mutex);
                 m_datas[i.first].push_back(rds);
                 sherry::Atomic::addFetch(done, 1);
@@ -1235,6 +1227,7 @@ void RedisManager::init() {
                 sherry::RedisCluster* rds(new sherry::RedisCluster(i.second));
                 rds->connect();
                 rds->setLastActiveTime(time(0));
+                rds->setName(i.first);
                 sherry::RWMutex::WriteLock lock(m_mutex);
                 m_datas[i.first].push_back(rds);
                 sherry::Atomic::addFetch(done, 1);
