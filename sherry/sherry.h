@@ -9,4 +9,5 @@
 #include "util.h"
 #include "macro.h"
 #include "fiber.h"
+#include "util/hash_util.h"
 #endif

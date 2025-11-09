@@ -3,9 +3,12 @@
 #include "../sherry/ota_manager.h"
 #include "../sherry/ota_http_command_dispatcher.h"
 #include "../sherry/fiber.h"
+#include "../sherry/config.h"
+#include "../sherry/db/redis.h"
 
 #include <thread>
 #include <fcntl.h>
+#include <yaml-cpp/yaml.h>
 
 static sherry::Logger::ptr g_logger = SYLAR_LOG_ROOT();
 
@@ -21,6 +24,9 @@ sherry::OTAManager::ptr ota_mgr = nullptr;
 
 std::string ota_html;
 const std::string ota_htmlPath = "./file/ota.html";
+
+// ---------------redis pool ---------------------
+const std::string redisPool_name = "local";
 
 void setOptions(sherry::http::HttpResponse::ptr rsp){
     SYLAR_LOG_INFO(g_logger) << "OPTIONS";
@@ -268,6 +274,20 @@ int getOtaHtml(const char* filePath, char* file, size_t len){
 int main(int argc, char** argv){
     g_logger->setLevel(sherry::LogLevel::DEBUG);
 
+    // 1. 加载配置文件
+    try {
+        YAML::Node config = YAML::LoadFile("./config/ota_system.yaml");
+        sherry::Config::LoadFromYaml(config);
+        SYLAR_LOG_INFO(g_logger) << "Config loaded successfully";
+    } catch(const std::exception& e) {
+        SYLAR_LOG_ERROR(g_logger) << "Failed to load config: " << e.what();
+        // 配置加载失败，但继续运行（使用默认配置）
+    }
+
+    // 2. 在主线程中提前初始化 RedisManager（避免多线程竞态）
+    sherry::RedisManager* redis_mgr = sherry::RedisMgr::GetInstance();
+    redis_mgr->dump(std::cout);
+
     char buff[4096 * 2];
     
     int len = getOtaHtml(ota_htmlPath.c_str(), buff, sizeof(buff));
@@ -276,7 +296,10 @@ int main(int argc, char** argv){
     SYLAR_LOG_DEBUG(g_logger) << "read html len = " << len;
 
     worker.reset(new sherry::IOManager(4, false, "worker"));
-    ota_mgr =  std::make_shared<sherry::OTAManager>(file_size, protocol, host, port,  "./file/", worker);
+
+    // 3. 创建 OTAManager
+    ota_mgr = std::make_shared<sherry::OTAManager>(file_size, protocol, host, port, "./file/", worker, 
+                                                    redisPool_name);
     sherry::IOManager iom(1, true, "main");
     iom.schedule(run);
 

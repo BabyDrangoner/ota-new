@@ -13,6 +13,7 @@
 #include "ota_http_response_builder.h"
 #include "ota_subscribe_download.h"
 #include "iomanager.h"
+#include "db/redis.h"
 
 #include <unordered_map>
 #include <unordered_set>
@@ -25,7 +26,8 @@ public:
     typedef RWMutex RWMutexType;
     OTAManager(size_t file_size, const std::string& protocol
                 , const std::string& host, int port
-                , const std::string& file_prev_path, IOManager::ptr io_mgr);
+                , const std::string& file_prev_path, IOManager::ptr io_mgr
+                , const std::string& redis_name = "");
 
     static OTAManager* GetThis();
     void SetThis();
@@ -43,7 +45,7 @@ public:
     bool add_device(uint16_t device_type, uint32_t device_no);
     bool remove_device(uint16_t device_type, uint32_t device_no);
 
-    void ota_notify(uint64_t device_type
+    void ota_notify(uint16_t device_type
                     , const std::string& name
                     , const std::string& version
                     , http::HttpResponse::ptr rsp);
@@ -97,6 +99,10 @@ private:
     std::unordered_map<std::string, OTANotifier::ptr> m_ota_notifier_map;
     std::unordered_map<uint16_t, std::unordered_map<uint32_t, OTASubscribeDownload::ptr>> m_ota_subscribe_download_map;
     
+    std::string m_redis_pool_name;
 };
+
+void setHttpResponse(http::HttpResponse::ptr rsp, http::HttpStatus status
+                    , const std::string& msg = "");
 }
 #endif
