@@ -23,7 +23,6 @@ include_directories(
 # 库文件路径
 # ===============================
 link_directories(
-    ${PROJECT_SOURCE_DIR}/lib64
     /apps/sherry/lib
 )
 
@@ -33,9 +32,8 @@ link_directories(
 find_library(YAMLCPP NAMES yaml-cpp)
 find_library(SSL_LIB NAMES ssl)
 find_library(CRYPTO_LIB NAMES crypto)
-find_library(PAHO_MQTTPP3 NAMES paho-mqttpp3 PATHS ${PROJECT_SOURCE_DIR}/lib64)
-find_library(PAHO_MQTT3C NAMES paho-mqtt3c PATHS ${PROJECT_SOURCE_DIR}/lib64)
-find_library(PAHO_MQTT3AS NAMES paho-mqtt3as PATHS ${PROJECT_SOURCE_DIR}/lib64)
+find_library(PAHO_MQTTPP3 NAMES paho-mqttpp3)
+find_library(PAHO_MQTT3AS NAMES paho-mqtt3as)
 find_library(EVENT_LIB NAMES event)
 
 # hiredis 与 hiredis_vip
@@ -110,7 +108,6 @@ set(LIBS
     pthread
     ${YAMLCPP}
     ${PAHO_MQTTPP3}
-    ${PAHO_MQTT3C}
     ${PAHO_MQTT3AS}
     ${SSL_LIB}
     ${CRYPTO_LIB}
@@ -149,6 +146,9 @@ add_sherry_executable(test_tcp_server)
 add_sherry_executable(test_http_server)
 add_sherry_executable(test_ota_server)
 add_sherry_executable(test_redis)
+add_sherry_executable(test_hash)
+add_sherry_executable(test_mqtt_client)
+
 
 add_executable(echo_server examples/echo_server.cc)
 add_dependencies(echo_server sherry)

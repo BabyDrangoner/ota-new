@@ -55,7 +55,7 @@ void test_device_group_id_timestamp() {
     std::cout << "\n=== Testing get_device_group_id_timestamp ===" << std::endl;
     
     // 测试1: 检查格式是否正确
-    std::string result1 = OTAHash::get_device_group_id_timestamp(1001, 8888);
+    std::string result1 = OTAHash::get_device_group_id_timestamp_hash(1001, 8888);
     std::cout << "  Generated: " << result1 << std::endl;
     
     // 验证前缀
@@ -84,7 +84,7 @@ void test_device_group_id_timestamp() {
     }
     
     // 测试2: 验证两次调用的时间戳不同
-    std::string result2 = OTAHash::get_device_group_id_timestamp(1001, 8888);
+    std::string result2 = OTAHash::get_device_group_id_timestamp_hash(1001, 8888);
     if (result1 != result2) {
         std::cout << "✓ Timestamps are different PASSED" << std::endl;
     } else {
@@ -100,7 +100,7 @@ void test_key_prefix() {
     
     std::string key1 = OTAHash::get_device_group_hash(100);
     std::string key2 = OTAHash::get_device_id_hash(100, 200);
-    std::string key3 = OTAHash::get_device_group_id_timestamp(100, 200);
+    std::string key3 = OTAHash::get_device_group_id_timestamp_hash(100, 200);
     
     if (key1.substr(0, prefix.length()) == prefix &&
         key2.substr(0, prefix.length()) == prefix &&
