@@ -24,9 +24,15 @@ public:
         return ss.str();
     }
 
-    static std::string get_device_group_id_timestamp(uint16_t group_id, uint32_t device_id){
+    static std::string get_device_group_id_timestamp_hash(uint16_t group_id, uint32_t device_id){
         std::stringstream ss;
         ss << ota_redis_key_prefix << group_id << ":" << device_id << ":" << GetCurrentUS();
+        return ss.str();
+    }
+
+    static std::string get_device_group_mudule_hash(uint16_t group_id, const std::string& name){
+        std::stringstream ss;
+        ss << ota_redis_key_prefix << group_id << ":" << name;
         return ss.str();
     }
 
