@@ -13,7 +13,6 @@
 #include "ota_http_response_builder.h"
 #include "ota_subscribe_download.h"
 #include "iomanager.h"
-#include "db/redis.h"
 
 #include <unordered_map>
 #include <unordered_set>
@@ -57,6 +56,10 @@ public:
                   , uint32_t device_no
                   , const std::string& action
                   , http::HttpResponse::ptr rsp);
+    void ota_query_device(uint16_t device_type
+                                , uint32_t device_no
+                                , const std::string& action
+                                , http::HttpResponse::ptr rsp);
     void ota_query_download(uint16_t device_type
                            , uint32_t device_no
                            , const std::string& detail

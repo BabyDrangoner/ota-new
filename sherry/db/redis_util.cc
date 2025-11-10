@@ -1,12 +1,12 @@
-#include "db/redis_util.h"
-#include "db/redis.h"
-#include "log.h"
+#include "redis_util.h"
+#include "redis.h"
+#include "sherry/log.h"
 
 #define TAG "[REDIS_UTIL]"
 
-static sherry::Logger::ptr g_logger = SYLAR_LOG_ROOT("system");
 
 namespace sherry{
+static Logger::ptr g_logger = SYLAR_LOG_NAME("system");
 
 int redis_set_key_value(const std::string& key, const std::string& value, int expire_seconds){
     if(expire_seconds > 0){

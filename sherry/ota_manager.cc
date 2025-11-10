@@ -4,15 +4,20 @@
 #include "util.h"
 #include "http/http_util.h"
 #include "hash.h"
+#include "db/redis.h"
+#include "db/redis_util.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#define TAP "OTAMANAGER"
+
 namespace sherry{
 
-static Logger::ptr g_logger = SYLAR_LOG_NAME("system");
+static const uint64_t QUERY_RETAIN_TIME = 3600;
 
+static Logger::ptr g_logger = SYLAR_LOG_NAME("system");
 static OTAManager* t_otaMgr = nullptr;
 
 struct FileDetail{
@@ -374,6 +379,53 @@ void OTAManager::ota_query(uint16_t device_type
                            , uint32_t device_no
                            , const std::string& action
                            , http::HttpResponse::ptr rsp){
+    const std::string device_id_key = OTAHash::get_device_id_hash(device_type, device_no);
+    auto reply = RedisUtil::Cmd("GET %s", device_id_key.c_str());
+    if(!reply || reply->type == REDIS_REPLY_ERROR){
+    
+        SYLAR_LOG_ERROR(g_logger) << TAP
+           << " device_type = " << device_type
+           << ", device_no = " << device_no
+           << ", action = " << action
+           << ", redis error.";;
+
+        (void)setHttpResponse(rsp, http::HttpStatus::INTERNAL_SERVER_ERROR, "system error.");
+        return;
+    }
+
+    if(reply->type != REDIS_REPLY_NIL){
+        const std::string answer{reply->str};
+        if(redis_reset_value(device_id_key, answer, QUERY_RETAIN_TIME) == 0){
+            SYLAR_LOG_WARN(g_logger) << TAP
+                                     << " device_type = " << device_type
+                                     << ", device_no = " << device_no
+                                     << ", action = " << action
+                                     << ", redis reset value error.";
+        }
+
+        rsp->setStatus(http::HttpStatus::OK);
+        rsp->setBody(answer);
+        return;
+    }
+
+    ota_query(device_type, device_no, action, rsp);
+    const std::string& answer = rsp->getBody();
+    if(!answer.empty() &&
+        redis_set_key_value(device_id_key, answer, QUERY_RETAIN_TIME) == 0){
+        SYLAR_LOG_WARN(g_logger) << TAP
+            << "ota query device_type = " <<  device_type
+            << ", devcie_no = " << device_no
+            << ", action = " << action
+            << ", redis set key error.";
+    }
+    
+    return;
+}
+
+void OTAManager::ota_query_device(uint16_t device_type
+                                , uint32_t device_no
+                                , const std::string& action
+                                , http::HttpResponse::ptr rsp){
     const std::string type = "query";
     std::stringstream pub_stream, sub_stream;
     pub_stream = FormatOtaPrex(device_type, device_no);
