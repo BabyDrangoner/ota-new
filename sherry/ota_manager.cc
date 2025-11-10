@@ -166,7 +166,6 @@ void OTAManager::ota_notify(uint16_t device_type
     }
 
     // 3. check version
-    // Redis GET 返回 NIL 时，reply->str 为 NULL，type 为 REDIS_REPLY_NIL
     if(reply->type == REDIS_REPLY_STRING && reply->str && strcmp(reply->str, version.c_str()) == 0){
         std::stringstream ss;
         ss << "device_type = " << device_type
@@ -177,11 +176,7 @@ void OTAManager::ota_notify(uint16_t device_type
         std::string sstr = ss.str();
         SYLAR_LOG_WARN(g_logger) << sstr;
         
-        nlohmann::json j;
-        j["msg"] = std::move(sstr);
-        
-        rsp->setBody(j.dump());
-        rsp->setStatus(http::HttpStatus::OK);
+        (void)setHttpResponse(rsp, http::HttpStatus::OK, sstr);
         return;
     }
 
@@ -215,6 +210,19 @@ void OTAManager::ota_notify(uint16_t device_type
         
         if(notifier){
             notifier->stop();
+        }
+
+        auto reply2 = RedisUtil::Cmd("DEL %s", redis_device_group_key.c_str());
+        if(!reply2 || reply2->type == REDIS_REPLY_ERROR){
+            std::stringstream ss;
+            ss << "device_type = " << device_type
+                                    << ", name = " << name
+                                    << ", version = " << version
+                                    << ", redis reply: " << (!reply ? "NULL" : "REDIS_REPLY_ERROR")
+                                    << ", redis error.";
+            
+            std::string sstr = ss.str();
+            SYLAR_LOG_WARN(g_logger) << sstr;
         }
     }
     if(!notifier){
@@ -271,55 +279,95 @@ void OTAManager::ota_stop_notify(uint16_t device_type
                                 , const std::string& name
                                 , const std::string& version
                                 , http::HttpResponse::ptr rsp){
-    const std::string type = "stop_notify";
+    // 1. get version from redis
+    const std::string redis_device_group_key = OTAHash::get_device_group_mudule_hash(device_type, name);
+    auto reply = RedisUtil::Cmd("GET %s", redis_device_group_key.c_str());
+    if(!reply || reply->type == REDIS_REPLY_ERROR){
+        std::stringstream ss;
+        ss << "device_type = " << device_type
+                                << ", name = " << name
+                                << ", version = " << version
+                                << ", redis reply: " << (!reply ? "NULL" : "REDIS_REPLY_ERROR")
+                                << ", redis error.";
+        
+        std::string sstr = ss.str();
+        SYLAR_LOG_WARN(g_logger) << sstr;
+        
+        (void)setHttpResponse(rsp, http::HttpStatus::INTERNAL_SERVER_ERROR
+                             , "system error.");
 
-    std::stringstream ss;
-    ss << "/ota/" << device_type
-       << "/" << name 
-       << "/" << version
-       << "/notify";
+        return;
+    }
 
-    std::string topic = ss.str();
-
-    OTANotifier::ptr notifier = nullptr;
-    {
-        RWMutexType::ReadLock lock(m_notifier_mutex);
-        auto it = m_ota_notifier_map.find(topic);
-        if(it == m_ota_notifier_map.end()){
-            
+    // 2. check version
+    if(reply->type == REDIS_REPLY_STRING && reply->str){
+        if(strcmp(reply->str, version.c_str()) != 0){
             std::stringstream ss;
             ss << "device_type = " << device_type
-               << " notifier has not existed.";
-            std::string sstr = ss.str(); 
+                                    << ", name = " << name
+                                    << ", current version = " << reply->str
+                                    << ", need-stoping version = " << version;
             
+            std::string sstr = ss.str();
             SYLAR_LOG_WARN(g_logger) << sstr;
             
-            nlohmann::json j;
-            j["msg"] = std::move(sstr);
-
-            rsp->setBody(j.dump());
-            rsp->setStatus(http::HttpStatus::NOT_FOUND);
-            
+            (void)setHttpResponse(rsp, http::HttpStatus::NO_CONTENT, sstr);
             return;
         }
-        notifier = (*it).second;  // Copy shared_ptr while holding lock
-    }
-    // Call stop() after releasing the lock
-    notifier->stop();
-    
-    ss.clear();
-    ss << "device_type = " << device_type
-       << ", name = " << name
-       << ", version = " << version
-       << " notifier has been stopped.";
-    
-    std::string sstr = ss.str(); 
-    SYLAR_LOG_INFO(g_logger) << sstr;
 
-    nlohmann::json j;
-    j["msg"] = std::move(sstr);
-    rsp->setBody(j.dump());
-    rsp->setStatus(http::HttpStatus::OK);
+        std::stringstream ss;
+        ss << "/ota/" << device_type
+                      << "/" << name 
+                      << "/" << version
+                      << "/notify";
+
+        std::string topic = ss.str();
+
+        OTANotifier::ptr notifier = nullptr;
+        {
+            RWMutexType::ReadLock lock(m_notifier_mutex);
+            auto it = m_ota_notifier_map.find(topic);
+            if(it == m_ota_notifier_map.end()){
+                std::stringstream ss;
+                ss << "device_type = " << device_type
+                   << ", name = " << name
+                   << ", version = " << version
+                   << " notifier has not existed.";
+                std::string sstr = ss.str();                 
+                SYLAR_LOG_WARN(g_logger) << sstr;                
+            } else {
+                notifier = (*it).second;
+                m_ota_notifier_map.erase(it);
+            }
+        }
+        if(notifier){
+            notifier->stop();
+        }
+
+        auto reply3 = RedisUtil::Cmd("DEL %s", redis_device_group_key.c_str());
+        if(!reply3 || reply3->type == REDIS_REPLY_ERROR){
+            std::stringstream ss;
+            ss << "device_type = " << device_type
+                                    << ", name = " << name
+                                    << ", version = " << version
+                                    << ", redis reply: " << (!reply3 ? "NULL" : "REDIS_REPLY_ERROR")
+                                    << ", redis error.";
+            
+            std::string sstr = ss.str();
+            SYLAR_LOG_WARN(g_logger) << sstr;
+
+            (void)setHttpResponse(rsp, http::HttpStatus::INTERNAL_SERVER_ERROR,
+                                 "redis error.");
+            return;
+        }
+
+        (void)setHttpResponse(rsp, http::HttpStatus::OK, "stop notify successfully.");
+        return;
+    }
+
+    (void)setHttpResponse(rsp, http::HttpStatus::INTERNAL_SERVER_ERROR,
+                                 "unknown error.");
+
 }
 
 void OTAManager::ota_query(uint16_t device_type
