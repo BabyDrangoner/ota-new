@@ -91,6 +91,7 @@ set(LIB_SRC
     sherry/util/hash_util.cc
     sherry/db/fox_thread.cc
     sherry/db/redis.cc
+    sherry/db/redis_util.cc
 )
 
 # ===============================
