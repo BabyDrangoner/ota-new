@@ -428,8 +428,8 @@ void OTAManager::ota_query_device(uint16_t device_type
                                 , http::HttpResponse::ptr rsp){
     const std::string type = "query";
     std::stringstream pub_stream, sub_stream;
-    pub_stream = FormatOTAGrex(device_type, device_no);
-    sub_stream = FormatOTAGrex(device_type, device_no);
+    pub_stream = FormatOTAPrex(device_type, device_no);
+    sub_stream = FormatOTAPrex(device_type, device_no);
 
     pub_stream << "/query";
     sub_stream << "/responder";
