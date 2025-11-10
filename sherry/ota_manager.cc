@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#define TAP "OTAMANAGER"
+#define TAG "OTAMANAGER"
 
 namespace sherry{
 
@@ -383,7 +383,7 @@ void OTAManager::ota_query(uint16_t device_type
     auto reply = RedisUtil::Cmd("GET %s", device_id_key.c_str());
     if(!reply || reply->type == REDIS_REPLY_ERROR){
     
-        SYLAR_LOG_ERROR(g_logger) << TAP
+        SYLAR_LOG_ERROR(g_logger) << TAG
            << " device_type = " << device_type
            << ", device_no = " << device_no
            << ", action = " << action
@@ -396,7 +396,7 @@ void OTAManager::ota_query(uint16_t device_type
     if(reply->type != REDIS_REPLY_NIL){
         const std::string answer{reply->str};
         if(redis_reset_value(device_id_key, answer, QUERY_RETAIN_TIME) == 0){
-            SYLAR_LOG_WARN(g_logger) << TAP
+            SYLAR_LOG_WARN(g_logger) << TAG
                                      << " device_type = " << device_type
                                      << ", device_no = " << device_no
                                      << ", action = " << action
@@ -412,7 +412,7 @@ void OTAManager::ota_query(uint16_t device_type
     const std::string& answer = rsp->getBody();
     if(!answer.empty() &&
         redis_set_key_value(device_id_key, answer, QUERY_RETAIN_TIME) == 0){
-        SYLAR_LOG_WARN(g_logger) << TAP
+        SYLAR_LOG_WARN(g_logger) << TAG
             << "ota query device_type = " <<  device_type
             << ", devcie_no = " << device_no
             << ", action = " << action
@@ -428,8 +428,8 @@ void OTAManager::ota_query_device(uint16_t device_type
                                 , http::HttpResponse::ptr rsp){
     const std::string type = "query";
     std::stringstream pub_stream, sub_stream;
-    pub_stream = FormatOtaPrex(device_type, device_no);
-    sub_stream = FormatOtaPrex(device_type, device_no);
+    pub_stream = FormatOTAGrex(device_type, device_no);
+    sub_stream = FormatOTAGrex(device_type, device_no);
 
     pub_stream << "/query";
     sub_stream << "/responder";
