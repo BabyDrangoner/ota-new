@@ -349,7 +349,7 @@ void OTAManager::ota_stop_notify(uint16_t device_type
             notifier->stop();
         }
 
-        auto reply3 = RedisUtil::Cmd("DEL %s", redis_device_group_key.c_str());
+        auto reply3 = RedisUtil::Cmd(m_redis_pool_name, "DEL %s", redis_device_group_key.c_str());
         if(!reply3 || reply3->type == REDIS_REPLY_ERROR){
             std::stringstream ss;
             ss << "device_type = " << device_type
@@ -380,14 +380,14 @@ void OTAManager::ota_query(uint16_t device_type
                            , const std::string& action
                            , http::HttpResponse::ptr rsp){
     const std::string device_id_key = OTAHash::get_device_id_hash(device_type, device_no);
-    auto reply = RedisUtil::Cmd("GET %s", device_id_key.c_str());
+    auto reply = RedisUtil::Cmd(m_redis_pool_name, "GET %s", device_id_key.c_str());
     if(!reply || reply->type == REDIS_REPLY_ERROR){
     
         SYLAR_LOG_ERROR(g_logger) << TAG
            << " device_type = " << device_type
            << ", device_no = " << device_no
            << ", action = " << action
-           << ", redis error.";;
+           << ", redis error = " << (!reply ? "null" : "REDIS_REPLY_ERROR");
 
         (void)setHttpResponse(rsp, http::HttpStatus::INTERNAL_SERVER_ERROR, "system error.");
         return;
@@ -395,7 +395,7 @@ void OTAManager::ota_query(uint16_t device_type
 
     if(reply->type != REDIS_REPLY_NIL){
         const std::string answer{reply->str};
-        if(redis_reset_value(device_id_key, answer, QUERY_RETAIN_TIME) == 0){
+        if(redis_reset_value(m_redis_pool_name, device_id_key, answer, QUERY_RETAIN_TIME) == 0){
             SYLAR_LOG_WARN(g_logger) << TAG
                                      << " device_type = " << device_type
                                      << ", device_no = " << device_no
@@ -408,10 +408,10 @@ void OTAManager::ota_query(uint16_t device_type
         return;
     }
 
-    ota_query(device_type, device_no, action, rsp);
+    ota_query_device(device_type, device_no, action, rsp);
     const std::string& answer = rsp->getBody();
     if(!answer.empty() &&
-        redis_set_key_value(device_id_key, answer, QUERY_RETAIN_TIME) == 0){
+        redis_set_key_value(m_redis_pool_name, device_id_key, answer, QUERY_RETAIN_TIME) == 0){
         SYLAR_LOG_WARN(g_logger) << TAG
             << "ota query device_type = " <<  device_type
             << ", devcie_no = " << device_no
@@ -428,8 +428,8 @@ void OTAManager::ota_query_device(uint16_t device_type
                                 , http::HttpResponse::ptr rsp){
     const std::string type = "query";
     std::stringstream pub_stream, sub_stream;
-    pub_stream = FormatOTAPrex(device_type, device_no);
-    sub_stream = FormatOTAPrex(device_type, device_no);
+    pub_stream = FormatOtaPrex(device_type, device_no);
+    sub_stream = FormatOtaPrex(device_type, device_no);
 
     pub_stream << "/query";
     sub_stream << "/responder";
