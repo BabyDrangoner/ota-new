@@ -2,6 +2,8 @@
 #include "sherry/sherry.h"
 #include "sherry/log.h"
 
+#define TAG "[REDIS]"
+
 namespace sherry {
 
 static sherry::Logger::ptr g_logger = SYLAR_LOG_NAME("system");
@@ -1289,6 +1291,9 @@ ReplyPtr RedisUtil::Cmd(const std::string& name, const char* fmt, ...) {
 ReplyPtr RedisUtil::Cmd(const std::string& name, const char* fmt, va_list ap) {
     auto rds = RedisMgr::GetInstance()->get(name);
     if(!rds) {
+        SYLAR_LOG_ERROR(g_logger) << TAG 
+            << "redis_pool: " << name
+            << "GetInstance return null";
         return nullptr;
     }
     return rds->cmd(fmt, ap);
@@ -1297,6 +1302,9 @@ ReplyPtr RedisUtil::Cmd(const std::string& name, const char* fmt, va_list ap) {
 ReplyPtr RedisUtil::Cmd(const std::string& name, const std::vector<std::string>& args) {
     auto rds = RedisMgr::GetInstance()->get(name);
     if(!rds) {
+        SYLAR_LOG_ERROR(g_logger) << TAG 
+            << "redis_pool: " << name
+            << "GetInstance return null";
         return nullptr;
     }
     return rds->cmd(args);
@@ -1311,6 +1319,9 @@ ReplyPtr RedisUtil::TryCmd(const std::string& name, uint32_t count, const char* 
         va_end(ap);
 
         if(rt) {
+            SYLAR_LOG_ERROR(g_logger) << TAG 
+                << "redis_pool: " << name
+                << "GetInstance return null";
             return rt;
         }
     }
@@ -1321,6 +1332,9 @@ ReplyPtr RedisUtil::TryCmd(const std::string& name, uint32_t count, const std::v
     for(uint32_t i = 0; i < count; ++i) {
         ReplyPtr rt = Cmd(name, args);
         if(rt) {
+            SYLAR_LOG_ERROR(g_logger) << TAG 
+                << "redis_pool: " << name
+                << "GetInstance return null";
             return rt;
         }
     }

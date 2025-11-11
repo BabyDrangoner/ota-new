@@ -8,17 +8,17 @@
 namespace sherry{
 static Logger::ptr g_logger = SYLAR_LOG_NAME("system");
 
-int redis_set_key_value(const std::string& key, const std::string& value, int expire_seconds){
+int redis_set_key_value(const std::string& pool_name, const std::string& key, const std::string& value, int expire_seconds){
     if(expire_seconds > 0){
         // SET key value EX seconds
-        auto reply = RedisUtil::Cmd("SET %s %s EX %d", key.c_str(), value.c_str(), expire_seconds);
+        auto reply = RedisUtil::Cmd(pool_name, "SET %s %s EX %d", key.c_str(), value.c_str(), expire_seconds);
         if(!reply || reply->type == REDIS_REPLY_ERROR){
             SYLAR_LOG_ERROR(g_logger) << TAG << " redis set key with expire failed: " << key;
             return 0;
         }
     } else {
         // SET key value
-        auto reply = RedisUtil::Cmd("SET %s %s", key.c_str(), value.c_str());
+        auto reply = RedisUtil::Cmd(pool_name, "SET %s %s", key.c_str(), value.c_str());
         if(!reply || reply->type == REDIS_REPLY_ERROR){
             SYLAR_LOG_ERROR(g_logger) << TAG << " redis set key failed: " << key;
             return 0;
@@ -29,18 +29,18 @@ int redis_set_key_value(const std::string& key, const std::string& value, int ex
     return 1;
 }
 
-int redis_reset_value(const std::string& key, const std::string& value, int expire_seconds){
+int redis_reset_value(const std::string& pool_name, const std::string& key, const std::string& value, int expire_seconds){
     // 先删除旧值
-    if(redis_del_key(key) == 0){
+    if(redis_del_key(pool_name, key) == 0){
         SYLAR_LOG_WARN(g_logger) << TAG << " redis del key failed (may not exist): " << key;
     }
     
     // 设置新值
-    return redis_set_key_value(key, value, expire_seconds);
+    return redis_set_key_value(pool_name, key, value, expire_seconds);
 }
 
-int redis_del_key(const std::string& key){
-    auto reply = RedisUtil::Cmd("DEL %s", key.c_str());
+int redis_del_key(const std::string& pool_name, const std::string& key){
+    auto reply = RedisUtil::Cmd(pool_name, "DEL %s", key.c_str());
     if(!reply || reply->type == REDIS_REPLY_ERROR){
         SYLAR_LOG_ERROR(g_logger) << TAG << " redis del key failed: " << key;
         return 0;
@@ -57,8 +57,8 @@ int redis_del_key(const std::string& key){
     return 0;
 }
 
-int redis_get_key_value(const std::string& key, std::string& value){
-    auto reply = RedisUtil::Cmd("GET %s", key.c_str());
+int redis_get_key_value(const std::string& pool_name, const std::string& key, std::string& value){
+    auto reply = RedisUtil::Cmd(pool_name, "GET %s", key.c_str());
     if(!reply){
         SYLAR_LOG_ERROR(g_logger) << TAG << " redis get key failed: " << key;
         return 0;
@@ -84,8 +84,8 @@ int redis_get_key_value(const std::string& key, std::string& value){
     return 0;
 }
 
-int redis_key_exists(const std::string& key){
-    auto reply = RedisUtil::Cmd("EXISTS %s", key.c_str());
+int redis_key_exists(const std::string& pool_name, const std::string& key){
+    auto reply = RedisUtil::Cmd(pool_name, "EXISTS %s", key.c_str());
     if(!reply || reply->type == REDIS_REPLY_ERROR){
         SYLAR_LOG_ERROR(g_logger) << TAG << " redis exists check failed: " << key;
         return 0;
@@ -99,8 +99,8 @@ int redis_key_exists(const std::string& key){
     return 0;
 }
 
-int redis_set_expire(const std::string& key, int expire_seconds){
-    auto reply = RedisUtil::Cmd("EXPIRE %s %d", key.c_str(), expire_seconds);
+int redis_set_expire(const std::string& pool_name, const std::string& key, int expire_seconds){
+    auto reply = RedisUtil::Cmd(pool_name, "EXPIRE %s %d", key.c_str(), expire_seconds);
     if(!reply || reply->type == REDIS_REPLY_ERROR){
         SYLAR_LOG_ERROR(g_logger) << TAG << " redis set expire failed: " << key;
         return 0;
