@@ -36,6 +36,12 @@ public:
         return ss.str();
     }
 
+    static std::string get_device_mudule_hash(uint16_t group_id, uint32_t device_id, const std::string& name){
+        std::stringstream ss;
+        ss << ota_redis_key_prefix << group_id << ":" << device_id << ":" << name;
+        return ss.str();
+    }
+
 private:
     static constexpr const char* ota_redis_key_prefix = "ota:device:";
 };
