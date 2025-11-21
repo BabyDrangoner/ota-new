@@ -64,6 +64,10 @@ public:
                            , uint32_t device_no
                            , const std::string& detail
                            , http::HttpResponse::ptr rsp);
+    void ota_query_download_device(uint16_t device_type
+                                    , uint32_t device_no
+                                    , const std::string& name
+                                    , http::HttpResponse::ptr rsp);
     void ota_file_download(uint16_t device_type
                            , const std::string& name
                            , const std::string& version

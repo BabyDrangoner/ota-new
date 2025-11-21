@@ -3,7 +3,7 @@ redis:
         local:
             host: 127.0.0.1:6379
             type: redis
-            pool: 2
+            pool: 10
             timeout: 100
             passwd: "322322"
     desc: "type: redis,redis_cluster,fox_redis,fox_redis_cluster"

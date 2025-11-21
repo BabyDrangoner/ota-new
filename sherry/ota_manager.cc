@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#define TAG "OTAMANAGER"
+#define TAG "[OTAMANAGER] "
 
 namespace sherry{
 
@@ -535,6 +535,71 @@ void OTAManager::ota_query_device(uint16_t device_type
 }
 
 void OTAManager::ota_query_download(uint16_t device_type
+                                   , uint32_t device_no
+                                   , const std::string& name
+                                   , http::HttpResponse::ptr rsp){
+    const std::string device_module_key{
+        OTAHash::get_device_mudule_hash(device_type, device_no, name)};
+    auto reply = RedisUtil::Cmd(m_redis_pool_name, "GET %s", device_module_key.c_str());
+    if(!reply || reply->type == REDIS_REPLY_ERROR){
+        SYLAR_LOG_ERROR(g_logger) << TAG
+            << "device_type = " << device_type
+            << ", device_no = " << device_no
+            << ", name = " << name
+            << ", redis error = " << (!reply ? "null" : "REDIS_REPLY_ERROR");
+    }
+
+    const std::string device_module_flag_key{
+        OTAHash::get_device_mudule_flag_hash(device_type, device_no, name)};
+    if(reply){
+        if(reply->type == REDIS_REPLY_STRING){
+            (void)setHttpResponse(rsp, http::HttpStatus::OK, reply->str);
+            return;
+        } else if(reply->type == REDIS_REPLY_NIL){
+            auto reply2 = RedisUtil::Cmd(m_redis_pool_name, "GET %s", device_module_flag_key.c_str());
+            if(reply2){
+                switch (reply2->type){
+                    case REDIS_REPLY_ERROR:
+                        SYLAR_LOG_ERROR(g_logger) << TAG
+                            << "device_type = " << device_type
+                            << ", device_no = " << device_no
+                            << ", name = " << name
+                            << ", redis error = REDIS_REPLY_ERROR";
+                        break;
+                    case REDIS_REPLY_NIL:
+                        (void)ota_query_download_device(device_type, device_no, name, rsp);
+                        break;
+                    case REDIS_REPLY_STRING:
+                        
+
+                }
+            }
+        }
+    }
+
+
+    (void)ota_query_download_device(device_type, device_no, name, rsp);
+    if(rsp->getStatus() == http::HttpStatus::OK){
+        try{
+            nlohmann::json device_detail_json = nlohmann::json::parse(rsp->getBody());
+            if(device_detail_json.contains("download_status")
+            && device_detail_json["download_status"] != "down"
+            && redis_set_key_value(m_redis_pool_name, device_module_key, rsp->getBody()) == 0){
+                SYLAR_LOG_ERROR(g_logger) << TAG
+                    << "device_type = " << device_type
+                    << ", device_no = " << device_no
+                    << ", name = " << name
+                    << ", redis error.";
+            }
+        } catch(...){
+
+        }
+    }
+
+    return;
+}
+
+void OTAManager::ota_query_download_device(uint16_t device_type
                                     , uint32_t device_no
                                     , const std::string& name
                                     , http::HttpResponse::ptr rsp){

@@ -42,6 +42,10 @@ public:
         return ss.str();
     }
 
+    static std::string get_device_mudule_flag_hash(uint16_t group_id, uint32_t device_id, const std::string& name){
+        return get_device_group_mudule_hash(group_id, device_id, name) + ":flag";
+    }
+
 private:
     static constexpr const char* ota_redis_key_prefix = "ota:device:";
 };
