@@ -41,15 +41,15 @@ find_library(HIREDIS_LIB NAMES hiredis PATHS /usr/lib/x86_64-linux-gnu /lib/x86_
 find_library(HIREDIS_VIP_LIB NAMES hiredis_vip PATHS /usr/local/lib /usr/lib/x86_64-linux-gnu)
 
 if(NOT HIREDIS_LIB)
-    message(FATAL_ERROR "❌ hiredis not found! Please install: sudo apt install libhiredis-dev")
+    message(FATAL_ERROR "hiredis not found! Please install: sudo apt install libhiredis-dev")
 else()
-    message(STATUS "✅ Found hiredis: ${HIREDIS_LIB}")
+    message(STATUS "Found hiredis: ${HIREDIS_LIB}")
 endif()
 
 if(NOT HIREDIS_VIP_LIB)
-    message(WARNING "⚠️  hiredis_vip not found. Redis Cluster functions may fail.")
+    message(WARNING "hiredis_vip not found. Redis Cluster functions may fail.")
 else()
-    message(STATUS "✅ Found hiredis_vip: ${HIREDIS_VIP_LIB}")
+    message(STATUS "Found hiredis_vip: ${HIREDIS_VIP_LIB}")
 endif()
 
 
