@@ -151,7 +151,7 @@ void OTAManager::ota_notify(uint16_t device_type
     }
 
     // 2. get version in redis
-    const std::string redis_device_group_key{OTAHash::get_device_group_mudule_hash(device_type, name)};
+    const std::string redis_device_group_key{OTAHash::get_device_group_mudule_hash("notify", device_type, name)};
     auto reply = RedisUtil::Cmd(m_redis_pool_name, "GET %s", redis_device_group_key.c_str());
     if(!reply || reply->type == REDIS_REPLY_ERROR){
         std::stringstream ss;
@@ -285,7 +285,7 @@ void OTAManager::ota_stop_notify(uint16_t device_type
                                 , const std::string& version
                                 , http::HttpResponse::ptr rsp){
     // 1. get version from redis
-    const std::string redis_device_group_key = OTAHash::get_device_group_mudule_hash(device_type, name);
+    const std::string redis_device_group_key = OTAHash::get_device_group_mudule_hash("stop_notify", device_type, name);
     auto reply = RedisUtil::Cmd("GET %s", redis_device_group_key.c_str());
     if(!reply || reply->type == REDIS_REPLY_ERROR){
         std::stringstream ss;
@@ -379,7 +379,7 @@ void OTAManager::ota_query(uint16_t device_type
                            , uint32_t device_no
                            , const std::string& action
                            , http::HttpResponse::ptr rsp){
-    const std::string device_id_key = OTAHash::get_device_id_hash(device_type, device_no);
+    const std::string device_id_key = OTAHash::get_device_id_hash("query", device_type, device_no);
     auto reply = RedisUtil::Cmd(m_redis_pool_name, "GET %s", device_id_key.c_str());
     if(!reply || reply->type == REDIS_REPLY_ERROR){
     

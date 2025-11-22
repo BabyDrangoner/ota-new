@@ -5,10 +5,14 @@
 #include "../sherry/fiber.h"
 #include "../sherry/config.h"
 #include "../sherry/db/redis.h"
+#include "../sherry/db/redis_util.h"
+#include "../sherry/hash.h"
 
 #include <thread>
 #include <fcntl.h>
 #include <yaml-cpp/yaml.h>
+
+using namespace sherry;
 
 static sherry::Logger::ptr g_logger = SYLAR_LOG_ROOT();
 
@@ -26,9 +30,10 @@ std::string ota_html;
 const std::string ota_htmlPath = "./file/ota.html";
 
 // ---------------redis pool ---------------------
-const std::string redisPool_name = "local";
+static const std::string redis_ota_pool_name = "ota_pool";
+static const std::string redis_http_pool_name = "http_pool";
 
-void setOptions(sherry::http::HttpResponse::ptr rsp){
+static void setOptions(sherry::http::HttpResponse::ptr rsp){
     SYLAR_LOG_INFO(g_logger) << "OPTIONS";
 
     rsp->setStatus(sherry::http::HttpStatus::OK); // 204
@@ -37,7 +42,7 @@ void setOptions(sherry::http::HttpResponse::ptr rsp){
     rsp->setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-void setServerError(sherry::http::HttpResponse::ptr rsp){
+static void setServerError(sherry::http::HttpResponse::ptr rsp){
     SYLAR_LOG_ERROR(g_logger) << "server error !";
     rsp->setBody("server error");
     rsp->setStatus(sherry::http::HttpStatus::OK);
@@ -62,14 +67,10 @@ void run(){
             return 0;
         }
 
-        sherry::OTAManager* otaMgr = sherry::OTAManager::GetThis();
-        if(!otaMgr){
-            setServerError(rsp);
-            return 0;
-        }
+        const std::string req_body{req->getBody()};
 
-        SYLAR_LOG_INFO(g_logger) << req->getBody();
-        nlohmann::json j = nlohmann::json::parse(req->getBody());
+        SYLAR_LOG_INFO(g_logger) << req_body;
+        nlohmann::json j = nlohmann::json::parse(req_body);
         if(!j.contains("device_type") || !j.contains("version") || !j.contains("name")){
             rsp->setBody("request error");
             rsp->setStatus(sherry::http::HttpStatus::NOT_FOUND);
@@ -79,10 +80,9 @@ void run(){
         uint64_t device_type = j["device_type"];
         std::string name = j["name"];
         std::string version = j["version"];
-    
-        otaMgr->ota_notify(device_type, name, version, rsp);
-
-        return 0;
+        
+        auto key = sherry::OTAHash::get_device_message_queue_hash("notify", device_type);
+        return sherry::redis_push_message_queue_by_http(redis_http_pool_name, key, req_body, rsp);
     });
 
     sd->addServlet("/ota/query", [](sherry::http::HttpRequest::ptr req
@@ -101,20 +101,23 @@ void run(){
 
         SYLAR_LOG_INFO(g_logger) << req->getBody();
         nlohmann::json j = nlohmann::json::parse(req->getBody());
-        if(!j.contains("device_type") || !j.contains("device_no") || !j.contains("action")){
+        if(!j.contains("device_type") || !j.contains("name")){
             rsp->setBody("request error");
             rsp->setStatus(sherry::http::HttpStatus::NOT_FOUND);
             return 0;
         }
 
         uint16_t device_type = j["device_type"];
-        uint32_t device_no = j["device_no"];
-        std::string action = j["action"];
-    
-        otaMgr->ota_query(device_type, device_no, action, rsp);
+        std::string name = j["name"];
+        
+        auto key = sherry::OTAHash::get_device_group_mudule_hash("query", device_type, name);
+        auto ret = sherry::redis_query_by_http(redis_http_pool_name, key, rsp);
+        if(ret == -1){
+            rsp->setBody("device not exists.");
+        }
         rsp->setHeader("Content-Type", "application/json");
-
-        return 0;
+        
+        return ret;
     });
 
     sd->addServlet("/ota/query_download", [](sherry::http::HttpRequest::ptr req
@@ -125,27 +128,23 @@ void run(){
             return 0;
         }
 
-        sherry::OTAManager* otaMgr = sherry::OTAManager::GetThis();
-        if(!otaMgr){
-            setServerError(rsp);
-            return 0;
-        }
-
         SYLAR_LOG_INFO(g_logger) << req->getBody();
         nlohmann::json j = nlohmann::json::parse(req->getBody());
-        if(!j.contains("device_type") || !j.contains("device_no") || !j.contains("name")){
+        if(!j.contains("device_type") || !j.contains("name")){
             rsp->setBody("request error");
             rsp->setStatus(sherry::http::HttpStatus::NOT_FOUND);
             return 0;
         }
 
         uint16_t device_type = j["device_type"];
-        uint32_t device_no = j["device_no"];
         std::string name = j["name"];
-    
-        otaMgr->ota_query_download(device_type, device_no, name, rsp);
-
-        return 0;
+        
+        auto key = sherry::OTAHash::get_device_group_mudule_hash("query_download", device_type, name);
+        auto ret = sherry::redis_query_by_http(redis_http_pool_name, key, rsp);
+        if(ret == -1){
+            rsp->setBody("device is not downloading.");
+        }
+        return ret;
     });
 
     sd->addGlobServlet("/ota/file_download/*", [](sherry::http::HttpRequest::ptr req
@@ -299,7 +298,7 @@ int main(int argc, char** argv){
 
     // 3. 创建 OTAManager
     ota_mgr = std::make_shared<sherry::OTAManager>(file_size, protocol, host, port, "./file/", worker, 
-                                                    redisPool_name);
+                                                   redis_ota_pool_name);
     sherry::IOManager iom(1, true, "main");
     iom.schedule(run);
 
