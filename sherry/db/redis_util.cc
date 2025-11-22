@@ -120,4 +120,80 @@ int redis_set_expire(const std::string& pool_name, const std::string& key, int e
     return 0;
 }
 
+// ret: -1 quert null, 0 query error, 1 quert successfully
+int redis_query_by_http(const std::string& pool_name, const std::string& key
+                        , http::HttpResponse::ptr rsp){
+    auto reply_query = RedisUtil::Cmd(pool_name, "GET %s", key.c_str());
+    if(!reply_query){
+        SYLAR_LOG_ERROR(g_logger) << TAG
+            << " redis query by http error, reply is null, key "
+            << key;
+        rsp->setStatus(http::HttpStatus::INTERNAL_SERVER_ERROR);
+        return 0; 
+    } 
+
+    int ret = 1;
+    switch (reply_query->type){
+        case REDIS_REPLY_STRING:
+            rsp->setStatus(http::HttpStatus::OK);
+            rsp->setBody(reply_query->str);
+            break;
+        case REDIS_REPLY_NIL:
+            rsp->setStatus(http::HttpStatus::OK);
+            ret = -1;
+            break;
+        case REDIS_REPLY_ERROR:
+            SYLAR_LOG_ERROR(g_logger) << TAG
+                << " redis query by http error, reply is null, key "
+                << key;
+            rsp->setStatus(http::HttpStatus::INTERNAL_SERVER_ERROR);
+            ret = 0;
+            break;
+        default:
+            ret = 0;
+            break;
+    }
+
+    return ret;
+}
+
+int redis_push_message_queue_by_http(const std::string& pool_name, const std::string& key
+                                     , const std::string& value, http::HttpResponse::ptr rsp){
+    auto reply_push_message_queue = RedisUtil::Cmd(pool_name,
+                                                   "LPUSH %s %s", key.c_str(), value.c_str());
+    if(!reply_push_message_queue){
+        SYLAR_LOG_ERROR(g_logger) << TAG
+            << " redis push message queue by http error, reply is null, key "
+            << key;
+        rsp->setStatus(http::HttpStatus::INTERNAL_SERVER_ERROR);
+        return 0;
+    }
+
+    int ret = 1;
+    switch (reply_push_message_queue->type) {
+        case REDIS_REPLY_INTEGER:
+            // LPUSH 成功，返回 list 新长度
+            rsp->setStatus(http::HttpStatus::OK);
+            rsp->setBody("task submits successfully.");
+            ret = 1;
+            break;
+        case REDIS_REPLY_ERROR:
+            SYLAR_LOG_ERROR(g_logger) << TAG
+                << " redis push message queue by http error, reply type is ERROR, key "
+                << key;
+            rsp->setStatus(http::HttpStatus::INTERNAL_SERVER_ERROR);
+            ret = 0;
+            break;
+        default:
+            SYLAR_LOG_ERROR(g_logger) << TAG
+                << " redis push message queue by http error, unexpected reply type="
+                << reply_push_message_queue->type << ", key " << key;
+            rsp->setStatus(http::HttpStatus::INTERNAL_SERVER_ERROR);
+            ret = 0;
+            break;
+    }
+
+    return ret;
+}
+
 } // namespace sherry
