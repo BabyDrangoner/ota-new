@@ -13,6 +13,7 @@
 #include "ota_http_response_builder.h"
 #include "ota_subscribe_download.h"
 #include "iomanager.h"
+#include "thread.h"
 
 #include <unordered_map>
 #include <unordered_set>
@@ -26,10 +27,14 @@ public:
     OTAManager(size_t file_size, const std::string& protocol
                 , const std::string& host, int port
                 , const std::string& file_prev_path, IOManager::ptr io_mgr
-                , const std::string& redis_name = "");
+                , const std::string& redis_pool_name = ""
+                , const std::string& redis_mq_pool_name = "");
 
     static OTAManager* GetThis();
     void SetThis();
+    
+    bool is_stopped() const { return m_stopped;}
+    bool is_running() const { return m_running;}
 
     void set_protocol(const std::string& v){ m_protocol = v;}
     void set_host(const std::string& v){ m_host = v;}
@@ -72,22 +77,25 @@ public:
 
     int getFileDetail(const std::string& file_path, struct FileDetail& file_detail);
 
-
     bool check_device(uint16_t device_type, uint32_t device_no);
     bool check_device(uint16_t device_type);
-
+    
     static int send_file(int fd, off_t* offset, size_t file_size, http::HttpSession::ptr session);
     static void sendFile(int fd, Fiber::ptr thisFiber, off_t offset, size_t file_size, http::HttpSession::ptr session);
 
 private:
     bool get_notify_message(uint16_t device_type, const std::string& name, const std::string& version, struct OTAMessage& msg);
-
+    void redis_message_queue_thread_run();
+    void redis_message_queue_thread_command_dispatch(const std::string& command);
 private:
     RWMutexType m_mutex;
     RWMutexType m_notifier_mutex;
     std::string m_protocol;
     std::string m_host;
     int m_port;
+
+    bool m_running;
+    bool m_stopped;
 
     std::string m_file_prev_path;
     ssize_t m_buffer_size;
@@ -103,6 +111,9 @@ private:
     std::unordered_map<uint16_t, std::unordered_map<uint32_t, OTASubscribeDownload::ptr>> m_ota_subscribe_download_map;
     
     std::string m_redis_pool_name;
+    std::string m_redis_mq_pool_name;
+    
+    std::unique_ptr<Thread> m_redis_message_queue_consume_thread; 
 };
 
 void setHttpResponse(http::HttpResponse::ptr rsp, http::HttpStatus status

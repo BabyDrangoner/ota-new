@@ -32,7 +32,7 @@ const std::string ota_htmlPath = "./file/ota.html";
 // ---------------redis pool ---------------------
 static const std::string redis_ota_pool_name = "ota_pool";
 static const std::string redis_http_pool_name = "http_pool";
-
+static const std::string redis_mq_pool_name = "ota_mq_pool";
 static void setOptions(sherry::http::HttpResponse::ptr rsp){
     SYLAR_LOG_INFO(g_logger) << "OPTIONS";
 
@@ -76,12 +76,8 @@ void run(){
             rsp->setStatus(sherry::http::HttpStatus::NOT_FOUND);
             return 0;
         }
-
-        uint64_t device_type = j["device_type"];
-        std::string name = j["name"];
-        std::string version = j["version"];
         
-        auto key = sherry::OTAHash::get_device_message_queue_hash("notify", device_type);
+        auto key = sherry::OTAHash::get_message_queue_hash();
         return sherry::redis_push_message_queue_by_http(redis_http_pool_name, key, req_body, rsp);
     });
 
@@ -298,7 +294,7 @@ int main(int argc, char** argv){
 
     // 3. 创建 OTAManager
     ota_mgr = std::make_shared<sherry::OTAManager>(file_size, protocol, host, port, "./file/", worker, 
-                                                   redis_ota_pool_name);
+                                                   redis_ota_pool_name, redis_mq_pool_name);
     sherry::IOManager iom(1, true, "main");
     iom.schedule(run);
 
