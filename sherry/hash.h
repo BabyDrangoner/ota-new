@@ -54,6 +54,12 @@ public:
         return ss.str();
     }
 
+    static std::string get_message_queue_hash(){
+        std::stringstream ss;  
+        ss << ota_redis_key_prefix << "message";
+        return ss.str();
+    }
+
 private:
     static constexpr const char* ota_redis_key_prefix = "ota:device:";
 };

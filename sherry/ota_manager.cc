@@ -11,10 +11,11 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#define TAG "OTAMANAGER"
+#define TAG "[OTAManager]"
 
 namespace sherry{
 
+static const size_t REDIS_MESSAGE_QUEUE_MAX_ERROR_COUNT = 10;
 static const uint64_t QUERY_RETAIN_TIME = 3600;
 
 static Logger::ptr g_logger = SYLAR_LOG_NAME("system");
@@ -28,27 +29,29 @@ struct FileDetail{
 OTAManager::OTAManager(size_t buffer_size, const std::string& protocol
                        , const std::string& host, int port
                        , const std::string& file_prev_path, IOManager::ptr io_mgr
-                       , const std::string& redis_name)
+                       , const std::string& redis_pool_name
+                       , const std::string& redis_mq_pool_name)
     :m_protocol(protocol)
     ,m_host(host)
     ,m_port(port)
+    ,m_running(true)
+    ,m_stopped(false)
     ,m_file_prev_path(file_prev_path)
-    ,m_buffer_size(buffer_size){
+    ,m_buffer_size(buffer_size)
+    ,m_redis_pool_name(redis_pool_name)
+    ,m_redis_mq_pool_name(redis_mq_pool_name){
+
     m_timer_mgr = io_mgr;
     m_device_types_counts = 0;
     m_device_counts = 0;
     m_callback_mgr = std::make_shared<OTAClientCallbackManager>();
     m_client_mgr = std::make_shared<MqttClientManager>(m_port, m_protocol, m_host, m_callback_mgr);
     
-    // 使用连接池而非直接连接
-    m_redis_pool_name = redis_name.empty() ? "default_redis_pool" : redis_name;
-    
-    SYLAR_LOG_INFO(g_logger) << "OTAManager using redis pool: " << m_redis_pool_name;
-    
     m_device_type_nums.clear();
     m_ota_notifier_map.clear();
-    // g_logger->setLevel(LogLevel::Level::ERROR);
 
+    m_redis_message_queue_consume_thread.reset(
+        new Thread(std::bind(&OTAManager::redis_message_queue_thread_run, this), "redis_mq_consumer"));
     SetThis();
 }
 
@@ -806,6 +809,66 @@ bool OTAManager::check_device(uint16_t device_type){
     return true;
 }
 
+void OTAManager::redis_message_queue_thread_run(){
+    SYLAR_LOG_INFO(g_logger) << TAG
+        << " redis message queue thread start running.";
+    
+    // SYLAR_ASSERT(ota_mgr);
+    // SYLAR_ASSERT(message_queue_key.size());
+    
+    size_t error_cnt = 0;
+    auto redis_mq_key = OTAHash::get_message_queue_hash();
+    while(!this->is_stopped()){
+        auto reply = RedisUtil::Cmd(m_redis_mq_pool_name, "BRPOP %s 0"
+                                    , redis_mq_key.c_str());
+        if(!reply){
+            SYLAR_LOG_ERROR(g_logger) << TAG
+                << " redis message queue thread error, reply is null";
+            ++error_cnt;
+        } else {
+            switch (reply->type){
+                case REDIS_REPLY_ARRAY:
+                    // BRPOP 返回 [key, value]，所以 elements 应该是 2
+                    if(reply->elements == 2 && reply->element[1]->type == REDIS_REPLY_STRING){
+                        // element[1] 才是真正的消息内容
+                        this->redis_message_queue_thread_command_dispatch(std::string(reply->element[1]->str));
+                        error_cnt = 0;
+                    } else {
+                        SYLAR_LOG_ERROR(g_logger) << TAG
+                            << " redis message queue thread reply format error, elements=" << reply->elements;
+                        ++error_cnt;
+                    }
+                    break;
+                case REDIS_REPLY_NIL:
+                    // 超时返回 NIL，这里设了 0 理论上一直阻塞，但防守性编程加上
+                    error_cnt = 0;
+                    break;
+                default:
+                    SYLAR_LOG_DEBUG(g_logger) << TAG
+                        << " redis message queue thread reply type error, type = "
+                        << reply->type;
+                    ++error_cnt;
+                    break;
+            }
+        }
+
+        if(error_cnt > REDIS_MESSAGE_QUEUE_MAX_ERROR_COUNT){
+            SYLAR_LOG_ERROR(g_logger) << TAG
+                << " redis message queue thread error cnt > MAX COUNT, thread exit";
+            break;
+        }
+    }
+
+    SYLAR_LOG_INFO(g_logger) << TAG
+        << " redis message queue thread exit.";
+    
+}
+
+void OTAManager::redis_message_queue_thread_command_dispatch(const std::string& command){
+    SYLAR_LOG_INFO(g_logger) << TAG
+        << "redis command " << command;
+}
+
 void setHttpResponse(http::HttpResponse::ptr rsp, http::HttpStatus status
                     , const std::string& msg){
     
@@ -815,7 +878,5 @@ void setHttpResponse(http::HttpResponse::ptr rsp, http::HttpStatus status
     rsp->setBody(j.dump());
     rsp->setStatus(status);
 }
-
-
 
 }
