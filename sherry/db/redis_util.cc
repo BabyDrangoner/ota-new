@@ -168,6 +168,8 @@ int redis_push_message_queue_by_http(const std::string& pool_name, const std::st
         rsp->setStatus(http::HttpStatus::INTERNAL_SERVER_ERROR);
         return 0;
     }
+    SYLAR_LOG_DEBUG(g_logger) << TAG
+        << " redis push message queue key" << key;
 
     int ret = 1;
     switch (reply_push_message_queue->type) {
