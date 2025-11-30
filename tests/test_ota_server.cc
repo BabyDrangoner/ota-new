@@ -89,12 +89,6 @@ void run(){
             return 0;
         }
 
-        sherry::OTAManager* otaMgr = sherry::OTAManager::GetThis();
-        if(!otaMgr){
-            setServerError(rsp);
-            return 0;
-        }
-
         SYLAR_LOG_INFO(g_logger) << req->getBody();
         nlohmann::json j = nlohmann::json::parse(req->getBody());
         if(!j.contains("device_type") || !j.contains("name")){
