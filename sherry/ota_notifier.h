@@ -37,6 +37,9 @@ public:
     void start();
     void stop();
 
+    static bool get_notify_message(uint16_t device_type, const std::string& name
+                                   , const std::string& version, struct OTAMessage& msg);
+
 private:
     void publish_once(); // 实际发布逻辑
     RWMutexType m_mutex;
