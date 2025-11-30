@@ -75,4 +75,20 @@ void OTANotifier::publish_once(){
     
 }
 
+bool OTANotifier::get_notify_message(uint16_t device_type, const std::string& name
+                                     , const std::string& version, struct OTAMessage& msg){
+    msg.name = name;
+    msg.version = version;
+    msg.time = getCurrentTimeString();
+    msg.file_name = "agsspds_20241110.zip";
+    msg.file_size = 6773120;
+    msg.url_path = "http://127.0.0.1:18882/download/ota/agsspds";
+    msg.md5_value = "ed076287532e86365e841e92bfc50d8c";
+    msg.launch_mode = 0;
+    msg.upgrade_mode = 1;
+
+    return true;
+
+}
+
 }
