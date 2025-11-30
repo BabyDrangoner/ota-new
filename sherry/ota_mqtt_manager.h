@@ -1,5 +1,5 @@
-#ifndef _SHERRY_OTAMANAGER_H__
-#define _SHERRY_OTAMANAGER_H__
+#ifndef _SHERRY_OTAMqttManager_H__
+#define _SHERRY_OTAMqttManager_H__
 
 #include "sherry.h"
 #include "scheduler.h"
@@ -19,18 +19,17 @@
 #include <unordered_set>
 
 namespace sherry{
-class HttpServer;
-class OTAManager{
+class OTACommandDispatcher;
+class OTAMqttManager{
 public:
-    typedef std::shared_ptr<OTAManager> ptr;
+    typedef std::shared_ptr<OTAMqttManager> ptr;
     typedef RWMutex RWMutexType;
-    OTAManager(size_t file_size, const std::string& protocol
-                , const std::string& host, int port
-                , const std::string& file_prev_path, IOManager::ptr io_mgr
-                , const std::string& redis_pool_name = ""
-                , const std::string& redis_mq_pool_name = "");
+    OTAMqttManager(size_t file_size, const std::string& protocol
+               , const std::string& host, int port
+               , const std::string& redis_pool_name = ""
+               , const std::string& redis_mq_pool_name = "");
 
-    static OTAManager* GetThis();
+    static OTAMqttManager* GetThis();
     void SetThis();
     
     bool is_stopped() const { return m_stopped;}
@@ -51,40 +50,14 @@ public:
 
     void ota_notify(uint16_t device_type
                     , const std::string& name
-                    , const std::string& version
-                    , http::HttpResponse::ptr rsp);
+                    , const std::string& version);
     void ota_stop_notify(uint16_t device_type
                         , const std::string& name
-                        , const std::string& version
-                        , http::HttpResponse::ptr rsp);
-    void ota_query(uint16_t device_type
-                  , uint32_t device_no
-                  , const std::string& action
-                  , http::HttpResponse::ptr rsp);
-    void ota_query_device(uint16_t device_type
-                                , uint32_t device_no
-                                , const std::string& action
-                                , http::HttpResponse::ptr rsp);
-    void ota_query_download(uint16_t device_type
-                           , uint32_t device_no
-                           , const std::string& detail
-                           , http::HttpResponse::ptr rsp);
-    void ota_file_download(uint16_t device_type
-                           , const std::string& name
-                           , const std::string& version
-                           , http::HttpResponse::ptr rsp
-                           , http::HttpSession::ptr session);
-
-    int getFileDetail(const std::string& file_path, struct FileDetail& file_detail);
-
+                        , const std::string& version);
     bool check_device(uint16_t device_type, uint32_t device_no);
     bool check_device(uint16_t device_type);
-    
-    static int send_file(int fd, off_t* offset, size_t file_size, http::HttpSession::ptr session);
-    static void sendFile(int fd, Fiber::ptr thisFiber, off_t offset, size_t file_size, http::HttpSession::ptr session);
 
 private:
-    bool get_notify_message(uint16_t device_type, const std::string& name, const std::string& version, struct OTAMessage& msg);
     void redis_message_queue_thread_run();
     void redis_message_queue_thread_command_dispatch(const std::string& command);
 private:
@@ -97,7 +70,6 @@ private:
     bool m_running;
     bool m_stopped;
 
-    std::string m_file_prev_path;
     ssize_t m_buffer_size;
 
     IOManager::ptr m_timer_mgr;
@@ -113,10 +85,9 @@ private:
     std::string m_redis_pool_name;
     std::string m_redis_mq_pool_name;
     
-    std::unique_ptr<Thread> m_redis_message_queue_consume_thread; 
+    std::unique_ptr<Thread> m_redis_message_queue_consume_thread;
+    std::shared_ptr<OTACommandDispatcher> m_command_dispatcher;
+    IOManager::ptr m_command_ioMgr; 
 };
-
-void setHttpResponse(http::HttpResponse::ptr rsp, http::HttpStatus status
-                    , const std::string& msg = "");
 }
 #endif

@@ -74,7 +74,9 @@ set(LIB_SRC
     sherry/tcp_server.cc
     sherry/stream.cc
     sherry/socket_stream.cc
-    sherry/ota_manager.cc
+    sherry/ota_mqtt_manager.cc
+    sherry/ota_command_dispatcher.cc
+    sherry/ota_http_manager.cc
     sherry/ota_notifier.cc
     sherry/ota_subscribe_download.cc
     sherry/ota_query_responder.cc
