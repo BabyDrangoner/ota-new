@@ -26,6 +26,7 @@ size_t file_size = 4096;
 uint16_t device_type = 1;
 sherry::OTAMqttManager::ptr ota_mgr = nullptr;
 sherry::OTAHttpManager::ptr ota_http_mgr = nullptr;
+sherry::OTAClientCallbackManager::ptr ota_cb_mgr = nullptr;
 
 std::string ota_html;
 const std::string ota_htmlPath = "./file/ota.html";
@@ -44,6 +45,9 @@ void run(){
     while(!server->bind(addr)){
         sleep(2);
     }
+
+
+    ota_mgr->start();
 
     // 注册所有 OTA HTTP 路由
     ota_http_mgr->register_routes(server);
@@ -82,7 +86,11 @@ int getOtaHtml(const char* filePath, char* file, size_t len){
 int main(int argc, char** argv){
     g_logger->setLevel(sherry::LogLevel::DEBUG);
 
-    // 1. 加载配置文件
+    // 1. 注册配置项（必须在加载 YAML 之前）
+    auto mqtt_devices_config = sherry::Config::Lookup<std::vector<sherry::MqttDeviceConfig>>(
+        "mqtt.devices", std::vector<sherry::MqttDeviceConfig>(), "mqtt devices config");
+
+    // 2. 加载配置文件
     try {
         YAML::Node config = YAML::LoadFile("./config/ota_system.yaml");
         sherry::Config::LoadFromYaml(config);
@@ -106,7 +114,8 @@ int main(int argc, char** argv){
     worker.reset(new sherry::IOManager(4, false, "worker"));
 
     // 3. 创建 OTAManager
-    ota_mgr = std::make_shared<sherry::OTAMqttManager>(file_size, protocol, host, port, 
+    ota_cb_mgr = std::make_shared<OTAClientCallbackManager>();
+    ota_mgr = std::make_shared<sherry::OTAMqttManager>(file_size, ota_cb_mgr,
                                                        redis_ota_pool_name, redis_mq_pool_name);
     
     // 4. 创建 OTAHttpManager

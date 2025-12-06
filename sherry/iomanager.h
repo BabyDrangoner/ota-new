@@ -1,11 +1,3 @@
-/**
- * @file iomanager.h
- * @brief 基于Epoll的IO协程调度器
- * @author sylar.yin
- * @email 564628276@qq.com
- * @date 2019-05-28
- * @copyright Copyright (c) 2019年 sylar.yin All rights reserved (www.sylar.top)
- */
 #ifndef __SYLAR_IOMANAGER_H__
 #define __SYLAR_IOMANAGER_H__
 
@@ -17,17 +9,11 @@
 
 namespace sherry {
 
-/**
- * @brief 基于Epoll的IO协程调度器
- */
 class IOManager : public Scheduler, public TimerManager {
 public:
     typedef std::shared_ptr<IOManager> ptr;
     typedef RWMutex RWMutexType;
 
-    /**
-     * @brief IO事件
-     */
     enum Event {
         /// 无事件
         NONE    = 0x0,
@@ -37,9 +23,6 @@ public:
         WRITE   = 0x4,
     };
 private:
-    /**
-     * @brief Socket事件上线文类
-     */
     struct FdContext {
         typedef Mutex MutexType;
         /**

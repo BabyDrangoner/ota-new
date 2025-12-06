@@ -198,4 +198,15 @@ int redis_push_message_queue_by_http(const std::string& pool_name, const std::st
     return ret;
 }
 
+int redis_safe_set_key_value(const std::string& pool_name
+                             , const std::string& key
+                             , const std::string& value
+                             , int expire_seconds){
+    if(redis_key_exists(pool_name, key) == 1){
+        return redis_reset_value(pool_name, key, value, expire_seconds);
+    }
+    
+    return redis_set_key_value(pool_name, key, value, expire_seconds);
+}
+
 } // namespace sherry

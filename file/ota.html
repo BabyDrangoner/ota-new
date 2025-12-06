@@ -82,7 +82,6 @@
     <h2>🔍 查询设备版本</h2>
     <div class="row">
       <input id="query_type" placeholder="设备类型" />
-      <input id="query_no" placeholder="设备编号" />
       <input id="query_name" placeholder="文件名" />
     </div>
     <button onclick="query()">查询</button>
@@ -92,7 +91,6 @@
     <h2>📥 查询下载状态</h2>
     <div class="row">
       <input id="dl_type" placeholder="设备类型" />
-      <input id="dl_no" placeholder="设备编号" />
       <input id="dl_name" placeholder="文件名" />
     </div>
     <button onclick="queryDownload()">查询下载进度</button>
@@ -114,7 +112,7 @@
   </div>
 
 <script>
-  const api = "http://81.68.92.10:8020";
+  const api = "http://156.225.19.170:8020";
 
   function show(data) {
     document.getElementById("output").textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
@@ -139,7 +137,6 @@
     const body = {
       command: "query",
       device_type: parseInt(document.getElementById("query_type").value),
-      device_no: parseInt(document.getElementById("query_no").value),
       action: "getVersion",
       name: document.getElementById("query_name").value
     };
@@ -154,7 +151,6 @@
   async function queryDownload() {
     const body = {
       device_type: parseInt(document.getElementById("dl_type").value),
-      device_no: parseInt(document.getElementById("dl_no").value),
       name: document.getElementById("dl_name").value
     };
     const res = await fetch(api + "/ota/query_download", {

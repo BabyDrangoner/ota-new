@@ -80,6 +80,11 @@ int redis_push_message_queue_by_http(const std::string& pool_name
                                     , const std::string& value
                                     , http::HttpResponse::ptr rsp);
 
+int redis_safe_set_key_value(const std::string& pool_name
+                             , const std::string& key
+                             , const std::string& value
+                             , int expire_seconds = 0);
+
 } // namespace sherry
 
 #endif
