@@ -383,6 +383,102 @@ private:
     }
 };
 
+// MQTT 设备配置结构体
+struct MqttDeviceConfig {
+    uint16_t device_type;
+    std::string protocol;
+    std::string host;
+    int port;
+    std::vector<std::string> sub_topics;
+    std::vector<int> sub_qos;
+    std::vector<std::string> redis_keys;
+    std::vector<int> expire_seconds;
+
+    bool operator==(const MqttDeviceConfig& other) const {
+        return device_type == other.device_type
+            && protocol == other.protocol
+            && host == other.host
+            && port == other.port
+            && sub_topics == other.sub_topics
+            && sub_qos == other.sub_qos
+            && redis_keys == other.redis_keys
+            && expire_seconds == other.expire_seconds;
+    }
+};
+
+// MqttDeviceConfig 的 YAML 序列化/反序列化
+template<>
+class LexicalCast<std::string, MqttDeviceConfig> {
+public:
+    MqttDeviceConfig operator()(const std::string& v) {
+        YAML::Node node = YAML::Load(v);
+        MqttDeviceConfig config;
+        
+        config.device_type = node["device_type"].as<uint16_t>();
+        config.protocol = node["protocol"].as<std::string>();
+        config.host = node["host"].as<std::string>();
+        config.port = node["port"].as<int>();
+        
+        if(node["sub_topics"]) {
+            for(size_t i = 0; i < node["sub_topics"].size(); ++i) {
+                config.sub_topics.push_back(node["sub_topics"][i].as<std::string>());
+            }
+        }
+        
+        if(node["sub_qos"]) {
+            for(size_t i = 0; i < node["sub_qos"].size(); ++i) {
+                config.sub_qos.push_back(node["sub_qos"][i].as<int>());
+            }
+        }
+
+        if(node["redis_keys"]) {
+            for(size_t i = 0; i < node["redis_keys"].size(); ++i) {
+                config.redis_keys.push_back(node["redis_keys"][i].as<std::string>());
+            }
+        }
+        
+        if(node["expire_seconds"]) {
+            for(size_t i = 0; i < node["expire_seconds"].size(); ++i) {
+                config.expire_seconds.push_back(node["expire_seconds"][i].as<int>());
+            }
+        }
+        
+        return config;
+    }
+};
+
+template<>
+class LexicalCast<MqttDeviceConfig, std::string> {
+public:
+    std::string operator()(const MqttDeviceConfig& config) {
+        YAML::Node node;
+        node["device_type"] = config.device_type;
+        node["protocol"] = config.protocol;
+        node["host"] = config.host;
+        node["port"] = config.port;
+        
+        for(const auto& topic : config.sub_topics) {
+            node["sub_topics"].push_back(topic);
+        }
+        
+        for(int qos : config.sub_qos) {
+            node["sub_qos"].push_back(qos);
+        }
+
+        for(const auto& key : config.redis_keys) {
+            node["redis_keys"].push_back(key);
+        }
+
+        for(int seconds : config.expire_seconds) {
+            node["expire_seconds"].push_back(seconds);
+        }
+        
+        std::stringstream ss;
+        ss << node;
+        return ss.str();
+    }
+};
+
 }
 
 #endif

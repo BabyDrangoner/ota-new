@@ -82,6 +82,9 @@ set(LIB_SRC
     sherry/ota_query_responder.cc
     sherry/ota_client_callback.cc
     sherry/mqtt_client.cc
+    
+    sherry/ota/ota_device.cc
+    sherry/ota/ota_servlet.cc
 
     sherry/http/http11_parser.rl.cc
     sherry/http/httpclient_parser.rl.cc

@@ -24,6 +24,9 @@ void OTAClientCallbackManager::on_message(const std::string& topic, const std::s
         }
     }
 
+    SYLAR_LOG_INFO(g_logger) << "sub message from topic " << topic
+        << " payload " << payload;
+
     if(cb){
         try{
             cb(topic, payload);

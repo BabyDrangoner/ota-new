@@ -8,9 +8,8 @@ namespace sherry{
 static sherry::Logger::ptr g_logger = SYLAR_LOG_NAME("system");
 
 MqttClient::MqttClient(const std::string& protocol, int port, const std::string& host,
-    const std::string& client_id, int device_type,  OTAClientCallbackManager::ptr cbmgr)
+    const std::string& client_id, OTAClientCallbackManager::ptr cbmgr)
     :m_port(port)
-    ,m_device_type(device_type)
     ,m_protocol(protocol)
     ,m_host(host)
     ,m_client_id(client_id)
@@ -251,7 +250,6 @@ MqttClient::ptr MqttClientManager::get_client(int device_type){
         ,m_port
         ,m_host
         ,std::to_string(m_client_id)
-        ,device_type
         ,m_cbMgr
     );
 

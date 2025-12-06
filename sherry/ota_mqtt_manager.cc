@@ -27,26 +27,18 @@ struct FileDetail{
     std::string MD5;
 };
 
-OTAMqttManager::OTAMqttManager(size_t buffer_size, const std::string& protocol
-                       , const std::string& host, int port
-                       , const std::string& redis_pool_name
-                       , const std::string& redis_mq_pool_name)
-    :m_protocol(protocol)
-    ,m_host(host)
-    ,m_port(port)
-    ,m_running(true)
-    ,m_stopped(false)
+OTAMqttManager::OTAMqttManager(size_t buffer_size
+                               , OTAClientCallbackManager::ptr cb_mgr
+                               , const std::string& redis_pool_name
+                               , const std::string& redis_mq_pool_name)
+    :m_running(false)
     ,m_buffer_size(buffer_size)
+    ,m_device_counts(0)
+    ,m_callback_mgr(cb_mgr)
     ,m_redis_pool_name(redis_pool_name)
     ,m_redis_mq_pool_name(redis_mq_pool_name){
-
-    m_device_types_counts = 0;
-    m_device_counts = 0;
-    m_callback_mgr = std::make_shared<OTAClientCallbackManager>();
-    m_client_mgr = std::make_shared<MqttClientManager>(m_port, m_protocol, m_host, m_callback_mgr);
     
-    m_device_type_nums.clear();
-    m_ota_notifier_map.clear();
+    m_devices.clear();
 
     // 初始化命令分发器
     m_command_dispatcher = std::make_shared<OTACommandDispatcher>(this);
@@ -54,8 +46,39 @@ OTAMqttManager::OTAMqttManager(size_t buffer_size, const std::string& protocol
     m_command_ioMgr = std::make_shared<IOManager>(2, false, "ota_cmd_worker");
     m_timer_mgr = std::make_shared<IOManager>(4, false, "ota_timer_worker");
 
-    m_redis_message_queue_consume_thread.reset(
-        new Thread(std::bind(&OTAMqttManager::redis_message_queue_thread_run, this), "redis_mq_consumer"));
+    // 从配置文件中加载 MQTT 设备配置
+    auto base_config = Config::LookupBase("mqtt.devices");
+    if(base_config) {
+        auto devices_config = std::dynamic_pointer_cast<ConfigVar<std::vector<MqttDeviceConfig>>>(base_config);
+        if(devices_config) {
+            auto devices = devices_config->getValue();
+            SYLAR_LOG_INFO(g_logger) << TAG << " Loading " << devices.size() << " MQTT devices from config";
+            
+            for(const auto& dev : devices) {
+                SYLAR_LOG_INFO(g_logger) << TAG
+                    << " Registering device_type=" << dev.device_type
+                    << " protocol=" << dev.protocol
+                    << " host=" << dev.host
+                    << " port=" << dev.port;
+                
+                bool ret = add_device(dev.device_type, dev.protocol, dev.host, dev.port,
+                                      m_callback_mgr, dev.sub_topics, dev.sub_qos,
+                                      dev.redis_keys, dev.expire_seconds);
+                if(ret) {
+                    SYLAR_LOG_INFO(g_logger) << TAG
+                        << " Device type " << dev.device_type << " registered successfully";
+                } else {
+                    SYLAR_LOG_ERROR(g_logger) << TAG
+                        << " Failed to register device type " << dev.device_type;
+                }
+            }
+        } else {
+            SYLAR_LOG_ERROR(g_logger) << TAG << " Failed to cast mqtt.devices config";
+        }
+    } else {
+        SYLAR_LOG_WARN(g_logger) << TAG << " No MQTT devices config found";
+    }
+
     SetThis();
 }
 
@@ -68,259 +91,115 @@ void OTAMqttManager::SetThis(){
     t_otaMgr = this;
 }
 
-bool OTAMqttManager::add_device(uint16_t device_type, uint32_t device_no){
-    RWMutexType::WriteLock lock(m_mutex);
-    auto it = m_device_type_nums.find(device_type);
-    if(it == m_device_type_nums.end()){
-        ++m_device_types_counts;
+void OTAMqttManager::start(){
+    m_redis_message_queue_consume_thread.reset(
+        new Thread(std::bind(&OTAMqttManager::redis_message_queue_thread_run, this), "redis_mq_consumer"));
+    for(auto it = m_devices.begin();it != m_devices.end();++it){
+        it->second->start();
+    }
+    m_running = true;
+}
+
+void OTAMqttManager::stop(){
+    m_running = false;
+    for(auto it = m_devices.begin();it != m_devices.end();++it){
+        it->second->stop();
+    }
+    m_redis_message_queue_consume_thread->join();
+}
+
+bool OTAMqttManager::add_device(uint16_t device_type
+                                , const std::string& protocol
+                                , const std::string& host
+                                , int port
+                                , OTAClientCallbackManager::ptr cb_mgr
+                                , const std::vector<std::string>& sub_topics
+                                , const std::vector<int>& sub_qos
+                                , const std::vector<std::string>& redis_keys
+                                , const std::vector<int> redis_expire_seconds){
+    RWMutexType::WriteLock lock(m_device_mutex);
+    auto it = m_devices.find(device_type);
+    if(it == m_devices.end()){
         ++m_device_counts;
-        m_device_type_nums[device_type].insert(device_no);
-        SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
-                                 << ", device no = " << device_no
-                                 << " success add.";
+        // 创建临时的非 const vector 用于传递给 OTADevice 构造函数
+        std::vector<std::string> topics(sub_topics);
+        std::vector<int> qos(sub_qos);
+        m_devices.emplace(device_type
+            , std::make_shared<OTADevice>(device_type, port
+                                          , protocol
+                                          , host
+                                          , cb_mgr
+                                          , topics
+                                          , qos
+                                          , redis_keys
+                                          , redis_expire_seconds
+                                          , m_redis_pool_name));
+        SYLAR_LOG_INFO(g_logger) << TAG
+            << "device type = " << device_type
+            << " added successfully.";
         return true;
     } 
-
-    auto itt = (*it).second.find(device_no);
-    if(itt == (*it).second.end()){
-        ++m_device_counts;
-        (*it).second.insert(device_no);
-        SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
-                                 << ", device no = " << device_no
-                                 << " has been added successfully.";
-        return true;
-    }
-
-    SYLAR_LOG_WARN(g_logger) << "device type = " << device_type
-                                 << ", device no = " << device_no
-                                 << " has been already added.";
+    
+    SYLAR_LOG_INFO(g_logger) << TAG
+        << "device type = " << device_type
+        << " has been already added.";
     return false;
 }
 
-bool OTAMqttManager::remove_device(uint16_t device_type, uint32_t device_no){
+bool OTAMqttManager::remove_device(uint16_t device_type){
     {
-        RWMutexType::ReadLock lock(m_mutex);
-        auto it = m_device_type_nums.find(device_type);
-        if(it == m_device_type_nums.end()){
-            SYLAR_LOG_WARN(g_logger) << "device type = " << device_type
-                                    << ", device no = " << device_no
-                                    << " has not been added.";
+        RWMutexType::ReadLock lock(m_device_mutex);
+        auto it = m_devices.find(device_type);
+        if(it == m_devices.end()){
+            SYLAR_LOG_WARN(g_logger) << TAG
+                << "device type = " << device_type
+                << " has not been added.";
             return false;
         } 
-
-        auto itt = (*it).second.find(device_no);
-        if(itt == (*it).second.end()){
-            ++m_device_counts;
-            (*it).second.insert(device_no);
-            SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
-                                    << ", device no = " << device_no
-                                    << " has not been added.";
-            return false;
-        }
     }
 
-    RWMutexType::WriteLock lock(m_mutex);
-    m_device_type_nums[device_type].erase(device_no);
+    RWMutexType::WriteLock lock(m_device_mutex);
+    m_devices.erase(device_type);
     --m_device_counts;
-    if(m_device_type_nums[device_type].size() == 0){
-        m_device_type_nums.erase(device_type);
-        --m_device_types_counts;
-        
-        SYLAR_LOG_DEBUG(g_logger) << "其他功能写完记得补充";
-    }
 
-    SYLAR_LOG_WARN(g_logger) << "device type = " << device_type
-                                 << ", device no = " << device_no
-                                 << " has been removed successfully.";
+    SYLAR_LOG_INFO(g_logger) << TAG
+        << "device type = " << device_type
+        << " has been removed successfully.";
     return true;
 }
 
-void OTAMqttManager::ota_notify(uint16_t device_type
-                            , const std::string& name
-                            , const std::string& version){
-    struct OTAMessage msg;
-    if(!OTANotifier::get_notify_message(device_type, name, version, msg)){
-        
-        std::stringstream ss;
-        ss << "device_type = " << device_type
-                                << ", name = " << name
-                                << ", version = " << version
-                                << " get notify message error";
-        
-        std::string sstr = ss.str();
-        SYLAR_LOG_WARN(g_logger) << sstr;
-        return;
+int OTAMqttManager::ota_notify(uint16_t device_type
+                              , const std::string& name
+                              , const std::string& version){
+    RWMutexType::ReadLock lock(m_device_mutex);
+    auto it = m_devices.find(device_type);
+    if(it == m_devices.end()){
+        SYLAR_LOG_WARN(g_logger) << TAG
+            << "ota notify device " << device_type
+            << " not exits";
+        return 0;
     }
-    std::stringstream ss;
-    ss << "/ota/" << device_type
-       << "/" << name 
-       << "/notify";
-    
-    std::string topic(ss.str());
-
-    OTANotifier::ptr notifier = nullptr;
-    // 检查 Redis 中是否已有版本记录（reply->str 不为 NULL 且不为空字符串）
-    const std::string redis_device_group_key{OTAHash::get_device_group_mudule_hash("notify", device_type, name)};
-    auto reply = RedisUtil::Cmd(m_redis_pool_name, "GET %s", redis_device_group_key.c_str());
-    if(!reply || reply->type == REDIS_REPLY_ERROR){
-        std::stringstream ss;
-        ss << "device_type = " << device_type
-                                << ", name = " << name
-                                << ", version = " << version
-                                << ", redis reply: " << (!reply ? "NULL" : "REDIS_REPLY_ERROR")
-                                << ", redis error.";
-        
-        std::string sstr = ss.str();
-        SYLAR_LOG_WARN(g_logger) << sstr;
-        return;
-    }
-    if(reply->type == REDIS_REPLY_STRING && reply->str && reply->str[0] != '\0'){
-        std::stringstream ss;
-        ss << "device_type = " << device_type
-                                << ", name = " << name
-                                << ", version = " << version
-                                << ", has a different version published.";
-        
-        std::string sstr = ss.str();
-        SYLAR_LOG_WARN(g_logger) << sstr;
-        
-        {
-            RWMutexType::ReadLock lock(m_notifier_mutex);
-            auto it = m_ota_notifier_map.find(topic);
-            if(it != m_ota_notifier_map.end()){
-                notifier = (*it).second;
-            }
-        }
-        
-        if(notifier){
-            notifier->stop();
-        }
-
-        auto reply2 = RedisUtil::Cmd("DEL %s", redis_device_group_key.c_str());
-        if(!reply2 || reply2->type == REDIS_REPLY_ERROR){
-            std::stringstream ss;
-            ss << "device_type = " << device_type
-                                    << ", name = " << name
-                                    << ", version = " << version
-                                    << ", redis reply: " << (!reply ? "NULL" : "REDIS_REPLY_ERROR")
-                                    << ", redis error.";
-            
-            std::string sstr = ss.str();
-            SYLAR_LOG_WARN(g_logger) << sstr;
-        }
-    }
-    if(!notifier){
-        std::stringstream ss;
-        ss << "device_type = " << device_type
-                                << ", name = " << name
-                                << ", version = " << version
-                                << ", first time publish.";
-        std::string sstr = ss.str();
-        SYLAR_LOG_INFO(g_logger) << sstr;
-
-        notifier = std::make_shared<OTANotifier>(device_type, m_timer_mgr
-                                                , topic, m_client_mgr, 10000);
-        {
-            RWMutexType::WriteLock lock(m_notifier_mutex);
-            m_ota_notifier_map[topic] = notifier;
-        }
-    }
-
-    // 5. set version in redis
-    auto reply3 = RedisUtil::Cmd(m_redis_pool_name, "SET %s %s", redis_device_group_key.c_str(), version.c_str());
-    if(!reply3 || reply3->type == REDIS_REPLY_ERROR){
-        std::stringstream ss;
-        ss << "device_type = " << device_type
-                                << ", name = " << name
-                                << ", version = " << version
-                                << ", redis reply: " << (!reply3 ? "NULL" : "REDIS_REPLY_ERROR")
-                                << ", redis error.";
-        
-        std::string sstr = ss.str();
-        SYLAR_LOG_WARN(g_logger) << sstr;
-        
-        {
-            RWMutexType::WriteLock lock(m_notifier_mutex);
-            m_ota_notifier_map.erase(topic);
-        }
-        return;
-    }
-
-    // 6. start notify
-    SYLAR_LOG_INFO(g_logger) << "device type = " << device_type
-                                     << " start to notify.";
-    notifier->set_message(msg);
-    notifier->start();
-
+    return it->second->ota_notify(name, version, m_timer_mgr, m_redis_pool_name);
 }
 
-void OTAMqttManager::ota_stop_notify(uint16_t device_type
+int OTAMqttManager::ota_stop_notify(uint16_t device_type
                                 , const std::string& name
                                 , const std::string& version){
-    std::stringstream ss;
-    ss << "/ota/" << device_type
-                    << "/" << name 
-                    << "/" << version
-                    << "/notify";
-
-    std::string topic = ss.str();
-
-    OTANotifier::ptr notifier = nullptr;
-    {
-        RWMutexType::ReadLock lock(m_notifier_mutex);
-        auto it = m_ota_notifier_map.find(topic);
-        if(it == m_ota_notifier_map.end()){
-            std::stringstream ss;
-            ss << "device_type = " << device_type
-                << ", name = " << name
-                << ", version = " << version
-                << " notifier has not existed.";
-            std::string sstr = ss.str();                 
-            SYLAR_LOG_WARN(g_logger) << sstr;                
-        } else {
-            notifier = (*it).second;
-            m_ota_notifier_map.erase(it);
-        }
+    RWMutexType::ReadLock lock(m_device_mutex);
+    auto it = m_devices.find(device_type);
+    if(it == m_devices.end()){
+        SYLAR_LOG_WARN(g_logger) << TAG
+            << "ota stop notify device " << device_type
+            << " not exits";
+        return 0;
     }
-    if(notifier){
-        notifier->stop();
-    }
-    const std::string redis_device_group_key{OTAHash::get_device_group_mudule_hash("notify", device_type, name)};
-    auto reply3 = RedisUtil::Cmd(m_redis_pool_name, "DEL %s", redis_device_group_key.c_str());
-    if(!reply3 || reply3->type == REDIS_REPLY_ERROR){
-        std::stringstream ss;
-        ss << "device_type = " << device_type
-                                << ", name = " << name
-                                << ", version = " << version
-                                << ", redis reply: " << (!reply3 ? "NULL" : "REDIS_REPLY_ERROR")
-                                << ", redis error.";
-        
-        std::string sstr = ss.str();
-        SYLAR_LOG_WARN(g_logger) << sstr;
-        return;
-    }
-    return;
-}
-
-bool OTAMqttManager::check_device(uint16_t device_type, uint32_t device_no){
-    RWMutexType::ReadLock lock(m_mutex);
-    auto it = m_device_type_nums.find(device_type);
-    if(it == m_device_type_nums.end()){
-        return false;
-    }
-
-    auto itt = (*it).second.find(device_no);
-    if(itt == (*it).second.end()){
-        return false;
-    }
-
-    return true;
+    return it->second->ota_stop_notify(name, version, m_redis_pool_name);
 }
 
 bool OTAMqttManager::check_device(uint16_t device_type){
-    RWMutexType::ReadLock lock(m_mutex);
-    auto it = m_device_type_nums.find(device_type);
-    if(it == m_device_type_nums.end()){
+    RWMutexType::ReadLock lock(m_device_mutex);
+    auto it = m_devices.find(device_type);
+    if(it == m_devices.end()){
         return false;
     }
 

@@ -19,14 +19,13 @@ public:
     using MessageCallback = std::function<void(const std::string&, const std::string&)>;
 
     MqttClient(const std::string& protocol, int port, const std::string& host,
-               const std::string& client_id, int m_device_type,
+               const std::string& client_id,
                OTAClientCallbackManager::ptr = nullptr);
     ~MqttClient() = default;
 
     void CreateMqttClient(mqtt::async_client*);
 
     int get_port() const { return m_port; }
-    int get_device_type() const { return m_device_type; }
     bool get_isconnected() const { return m_isconnected; }
     mqtt::connect_options get_connOpts() const { return m_connOpts; }
     MqttAddress::ptr get_serverAddress() const { return m_serverAddress; }
@@ -38,7 +37,6 @@ public:
                       const std::string& UserName, const std::string& PassWord,
                       int ConnTimeout);
 
-    void set_device_type(int v) { m_device_type = v; }
     void set_isconnected(bool v) { m_isconnected = v; }
     void set_cbmgr(OTAClientCallbackManager::ptr v) { m_cbmgr = v; }
 
@@ -60,7 +58,6 @@ public:
 private:
     RWMutexType m_mutex;
     int m_port;
-    int m_device_type;
     bool m_isconnected;
     std::string m_protocol;
     std::string m_host;
