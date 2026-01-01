@@ -1,5 +1,5 @@
 #ifndef _SHERRY_STREAM_H__
-#define _SHERRY_STREAN_H__
+#define _SHERRY_STREAM_H__
 
 #include <memory>
 #include "bytearray.h"
