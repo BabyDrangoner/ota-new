@@ -485,7 +485,7 @@ int OTAHttpManager::send_file(int fd, off_t* offset, size_t file_size, http::Htt
 void OTAHttpManager::sendFile(int fd, Fiber::ptr thisFiber, off_t offset, size_t file_size, http::HttpSession::ptr session){
 
     int rt = send_file(fd, &offset, file_size, session);
-    SYLAR_LOG_DEBUG(g_logger) << "sendFile file_size: " << file_size;
+    SYLAR_LOG_DEBUG(g_logger) << "sendFile fd " << fd << " file_size: " << file_size;
 
     if(rt == -1){
         SYLAR_LOG_WARN(g_logger) << "sendfile error: " << strerror(errno);
