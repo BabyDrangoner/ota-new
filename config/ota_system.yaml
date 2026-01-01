@@ -16,6 +16,41 @@ redis:
             host: 127.0.0.1:6379
             type: redis
             pool: 1
-            timeout: 0s
+            timeout: 0
             passwd: "322322"
     desc: "type: redis,redis_cluster,fox_redis,fox_redis_cluster"
+
+mqtt:
+    devices:
+        - device_type: 1
+          protocol: "tcp"
+          host: "127.0.0.1"
+          port: 1883
+          sub_topics:
+              - "/ota/device/query/1/gps"
+              - "/ota/device/query_download/1/gps"
+          sub_qos:
+              - 1
+              - 1
+          redis_keys:
+              - "ota:device:query:1:gps"
+              - "ota:device:query_download:1:gps"
+          expire_seconds:
+              - 0
+              - 20
+        - device_type: 2
+          protocol: "tcp"
+          host: "127.0.0.1"
+          port: 1883
+          sub_topics:
+              - "/ota/device/query/2/gps"
+              - "/ota/device/query_download/2/gps"
+          sub_qos:
+              - 1
+              - 1
+          redis_keys:
+              - "ota:device:query:2:gps"
+              - "ota:device:query_download:2:gps"
+          expire_seconds:
+              - 0
+              - 20

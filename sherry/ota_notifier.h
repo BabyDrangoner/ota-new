@@ -27,10 +27,9 @@ public:
     typedef std::shared_ptr<OTANotifier> ptr;
     typedef RWMutex RWMutexType;
 
-    OTANotifier(int device_type
-                ,IOManager::ptr timer_mgr
+    OTANotifier(IOManager::ptr timer_mgr
                 ,const std::string& topic
-                ,MqttClientManager::ptr client_mgr
+                ,MqttClient::ptr client
                 ,uint64_t interval_ms = 180000);
     
     void set_message(const OTAMessage& msg);
@@ -43,13 +42,10 @@ public:
 private:
     void publish_once(); // 实际发布逻辑
     RWMutexType m_mutex;
-
-    int m_device_type;
-    MqttClient::ptr m_client;
     IOManager::ptr m_timer_mgr;
-    Timer::ptr m_timer;
     std::string m_topic;
-    MqttClientManager::ptr m_client_mgr;
+    MqttClient::ptr m_client;
+    Timer::ptr m_timer;
     OTAMessage m_msg;
     uint64_t m_interval_ms;
 };
