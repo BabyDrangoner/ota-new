@@ -35,6 +35,7 @@ find_library(CRYPTO_LIB NAMES crypto)
 find_library(PAHO_MQTTPP3 NAMES paho-mqttpp3)
 find_library(PAHO_MQTT3AS NAMES paho-mqtt3as)
 find_library(EVENT_LIB NAMES event)
+find_library(ZLIB_LIB NAMES z)
 
 # hiredis 与 hiredis_vip
 find_library(HIREDIS_LIB NAMES hiredis PATHS /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu)
@@ -51,6 +52,10 @@ if(NOT HIREDIS_VIP_LIB)
 else()
     message(STATUS "Found hiredis_vip: ${HIREDIS_VIP_LIB}")
 endif()
+
+ragelmaker(sherry/http/http11_parser.rl LIB_SRC ${CMAKE_CURRENT_SOURCE_DIR}/sherry/http)
+ragelmaker(sherry/http/httpclient_parser.rl LIB_SRC ${CMAKE_CURRENT_SOURCE_DIR}/sherry/http)
+ragelmaker(sherry/uri.rl LIB_SRC ${CMAKE_CURRENT_SOURCE_DIR}/sherry)
 
 
 # ===============================
@@ -88,15 +93,19 @@ set(LIB_SRC
 
     sherry/http/http11_parser.rl.cc
     sherry/http/httpclient_parser.rl.cc
+    sherry/uri.rl.cc
     sherry/http/http_parser.cc
     sherry/http/http_session.cc
     sherry/http/http_server.cc
     sherry/http/servlet.cc
+    sherry/http/http_connection.cc
 
     sherry/util/hash_util.cc
     sherry/db/fox_thread.cc
     sherry/db/redis.cc
     sherry/db/redis_util.cc
+
+    sherry/streams/zlib_stream.cc
 )
 
 # ===============================
@@ -119,7 +128,8 @@ set(LIBS
     ${CRYPTO_LIB}
     ${EVENT_LIB}
     ${HIREDIS_LIB}
-    ${HIREDIS_VIP_LIB}  
+    ${HIREDIS_VIP_LIB}
+    ${ZLIB_LIB}
 )
 
 message(STATUS "*** Final link libraries: ${LIBS}")
@@ -154,6 +164,7 @@ add_sherry_executable(test_ota_server)
 add_sherry_executable(test_redis)
 add_sherry_executable(test_hash)
 add_sherry_executable(test_mqtt_client)
+add_sherry_executable(test_http_connection)
 
 
 add_executable(echo_server examples/echo_server.cc)
