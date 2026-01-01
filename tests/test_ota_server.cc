@@ -111,7 +111,7 @@ int main(int argc, char** argv){
     
     SYLAR_LOG_DEBUG(g_logger) << "read html len = " << len;
 
-    worker.reset(new sherry::IOManager(4, false, "worker"));
+    worker.reset(new sherry::IOManager(1, false, "worker"));
 
     // 3. 创建 OTAManager
     ota_cb_mgr = std::make_shared<OTAClientCallbackManager>();
