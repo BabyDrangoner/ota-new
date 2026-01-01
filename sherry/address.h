@@ -168,6 +168,8 @@ private:
     std::string m_MqttAddress;
 };
 
+std::ostream& operator<<(std::ostream& os, const Address& addr);
+
 }
 
 #endif
