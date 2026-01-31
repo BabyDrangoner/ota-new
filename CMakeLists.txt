@@ -91,6 +91,13 @@ set(LIB_SRC
     sherry/ota/ota_device.cc
     sherry/ota/ota_servlet.cc
 
+    sherry/device/ota_component.cc
+    sherry/device/ota_device_client.cc
+    sherry/device/ota_device_manager.cc
+    sherry/device/device_communicator.cc
+    sherry/device/device_camera.cc
+    #sherry/device/device_component.cc
+
     sherry/http/http11_parser.rl.cc
     sherry/http/httpclient_parser.rl.cc
     sherry/uri.rl.cc
@@ -165,6 +172,9 @@ add_sherry_executable(test_redis)
 add_sherry_executable(test_hash)
 add_sherry_executable(test_mqtt_client)
 add_sherry_executable(test_http_connection)
+add_sherry_executable(test_ota_device_client)
+add_sherry_executable(test_device_communicator)
+add_sherry_executable(test_device_camera)
 
 
 add_executable(echo_server examples/echo_server.cc)

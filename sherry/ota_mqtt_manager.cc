@@ -92,12 +92,12 @@ void OTAMqttManager::SetThis(){
 }
 
 void OTAMqttManager::start(){
+    m_running = true;
     m_redis_message_queue_consume_thread.reset(
         new Thread(std::bind(&OTAMqttManager::redis_message_queue_thread_run, this), "redis_mq_consumer"));
     for(auto it = m_devices.begin();it != m_devices.end();++it){
         it->second->start();
     }
-    m_running = true;
 }
 
 void OTAMqttManager::stop(){
@@ -215,7 +215,7 @@ void OTAMqttManager::redis_message_queue_thread_run(){
     
     size_t error_cnt = 0;
     auto redis_mq_key = OTAHash::get_message_queue_hash();
-    while(!this->is_stopped()){
+    while(this->is_running()){
         auto reply = RedisUtil::Cmd(m_redis_mq_pool_name, "BRPOP %s 0"
                                     , redis_mq_key.c_str());
         if(!reply){

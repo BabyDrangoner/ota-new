@@ -1,0 +1,134 @@
+#include "device_camera.h"
+#include "sherry/log.h"
+#include <fstream>
+#include <cstring>
+
+namespace sherry {
+namespace device {
+
+static sherry::Logger::ptr g_logger = SYLAR_LOG_NAME("system");
+static const char* TAG = "DeviceCamera";
+
+// ====================================================================================
+// SingleCamera Implementation
+// ====================================================================================
+
+SingleCamera::SingleCamera(int rgb_nums, int deep_nums,
+                           const std::string& rgb_image_path,
+                           const std::string& deep_image_path)
+    : m_rgb_image_nums(rgb_nums)
+    , m_deep_image_nums(deep_nums)
+    , m_need_buf_len(0)
+    , m_rgb_image(nullptr)
+    , m_rgb_image_size(0)
+    , m_deep_image(nullptr)
+    , m_deep_image_size(0) {
+    
+    // 加载 RGB 图片到内存
+    if (!rgb_image_path.empty() && m_rgb_image_nums > 0) {
+        std::ifstream rgb_file(rgb_image_path, std::ios::binary | std::ios::ate);
+        if (rgb_file.is_open()) {
+            m_rgb_image_size = static_cast<size_t>(rgb_file.tellg());
+            rgb_file.seekg(0, std::ios::beg);
+            
+            m_rgb_image = std::shared_ptr<char[]>(new char[m_rgb_image_size]);
+            if (rgb_file.read(m_rgb_image.get(), m_rgb_image_size)) {
+                SYLAR_LOG_INFO(g_logger) << "[" << TAG << "] " << "loaded RGB image from " 
+                                          << rgb_image_path 
+                                          << ", size: " << m_rgb_image_size << " bytes";
+            } else {
+                SYLAR_LOG_ERROR(g_logger) << "[" << TAG << "] " << "failed to read RGB image from " 
+                                           << rgb_image_path;
+                m_rgb_image.reset();
+                m_rgb_image_size = 0;
+            }
+            rgb_file.close();
+        } else {
+            SYLAR_LOG_ERROR(g_logger) << "[" << TAG << "] " << "failed to open RGB image file: " 
+                                       << rgb_image_path;
+        }
+    }
+    
+    // 加载 Deep 图片到内存
+    if (!deep_image_path.empty() && m_deep_image_nums > 0) {
+        std::ifstream deep_file(deep_image_path, std::ios::binary | std::ios::ate);
+        if (deep_file.is_open()) {
+            m_deep_image_size = static_cast<size_t>(deep_file.tellg());
+            deep_file.seekg(0, std::ios::beg);
+            
+            m_deep_image = std::shared_ptr<char[]>(new char[m_deep_image_size]);
+            if (deep_file.read(m_deep_image.get(), m_deep_image_size)) {
+                SYLAR_LOG_INFO(g_logger) << "[" << TAG << "] " << "loaded Deep image from " 
+                                          << deep_image_path 
+                                          << ", size: " << m_deep_image_size << " bytes";
+            } else {
+                SYLAR_LOG_ERROR(g_logger) << "[" << TAG << "] " << "failed to read Deep image from " 
+                                           << deep_image_path;
+                m_deep_image.reset();
+                m_deep_image_size = 0;
+            }
+            deep_file.close();
+        } else {
+            SYLAR_LOG_ERROR(g_logger) << "[" << TAG << "] " << "failed to open Deep image file: " 
+                                       << deep_image_path;
+        }
+    }
+    
+    // 计算需要的缓冲区大小: (image_header + image_data) * 数量
+    m_need_buf_len = (sizeof(image_header) + m_rgb_image_size) * m_rgb_image_nums
+                   + (sizeof(image_header) + m_deep_image_size) * m_deep_image_nums;
+    
+    SYLAR_LOG_INFO(g_logger) << "[" << TAG << "] " << "created: rgb_nums=" << m_rgb_image_nums
+                              << ", deep_nums=" << m_deep_image_nums
+                              << ", need_buf_len=" << m_need_buf_len;
+}
+
+int SingleCamera::make_images(char* buf, size_t buf_size) {
+    // 检查缓冲区大小是否足够
+    if (buf_size < m_need_buf_len) {
+        SYLAR_LOG_WARN(g_logger) << "[" << TAG << "] " << "make_images: buf_size(" << buf_size 
+                                  << ") < need_buf_len(" << m_need_buf_len << ")";
+        return 1;  // buf 太小
+    }
+    
+    char* ptr = buf;
+    
+    // 写入 RGB 图片
+    for (int i = 0; i < m_rgb_image_nums; ++i) {
+        // 设置 image_header
+        image_header* header = reinterpret_cast<image_header*>(ptr);
+        header->image_size = m_rgb_image_size;
+        header->type = ImageType::PNG;  // RGB 图片默认为 PNG
+        ptr += sizeof(image_header);
+        
+        // 拷贝图片数据
+        if (m_rgb_image && m_rgb_image_size > 0) {
+            std::memcpy(ptr, m_rgb_image.get(), m_rgb_image_size);
+            ptr += m_rgb_image_size;
+        }
+    }
+    
+    // 写入 Deep 图片
+    for (int i = 0; i < m_deep_image_nums; ++i) {
+        // 设置 image_header
+        image_header* header = reinterpret_cast<image_header*>(ptr);
+        header->image_size = m_deep_image_size;
+        header->type = ImageType::DEEP;  // Deep 图片使用 DEEP 类型
+        ptr += sizeof(image_header);
+        
+        // 拷贝图片数据
+        if (m_deep_image && m_deep_image_size > 0) {
+            std::memcpy(ptr, m_deep_image.get(), m_deep_image_size);
+            ptr += m_deep_image_size;
+        }
+    }
+    
+    SYLAR_LOG_DEBUG(g_logger) << "[" << TAG << "] " << "make_images: successfully wrote " 
+                               << (m_rgb_image_nums + m_deep_image_nums) << " images, "
+                               << "total bytes: " << (ptr - buf);
+    
+    return 0;  // 成功
+}
+
+} // namespace device
+} // namespace sherry
