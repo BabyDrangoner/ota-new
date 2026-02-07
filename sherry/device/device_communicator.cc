@@ -2,6 +2,9 @@
 #include "sherry/log.h"
 #include "sherry/iomanager.h"
 
+#include <errno.h>
+#include <string.h>
+
 namespace sherry {
 namespace device {
 
@@ -422,6 +425,216 @@ void HtppDeviceCommunicator::recv(struct recvCtx& ctx) {
             }
         }
     });
+}
+
+// ====================================================================================
+// SocketDeviceCommunicator Implementation
+// ====================================================================================
+
+SocketDeviceCommunicator::SocketDeviceCommunicator(const std::string& serv_ip,
+                                                   int serv_port,
+                                                   IOManager::ptr io_mgr,
+                                                   uint64_t connect_timeout_ms)
+    : DeviceCommnicator(serv_ip, serv_port)
+    , m_io_mgr(io_mgr)
+    , m_connect_timeout_ms(connect_timeout_ms) {
+    SYLAR_LOG_INFO(g_logger) << "SocketDeviceCommunicator created";
+}
+
+void SocketDeviceCommunicator::connect() {
+    if (m_is_connected) {
+        SYLAR_LOG_WARN(g_logger) << "SocketDeviceCommunicator already connected";
+        return;
+    }
+
+    try {
+        auto addr = sherry::IPv4Address::Create(m_ip.c_str(), m_port);
+        if (!addr) {
+            SYLAR_LOG_ERROR(g_logger) << "Failed to create IPv4 address: "
+                                       << m_ip << ":" << m_port;
+            return;
+        }
+
+        m_sock = sherry::Socket::CreateTCP(addr);
+        if (!m_sock) {
+            SYLAR_LOG_ERROR(g_logger) << "Failed to create TCP socket";
+            return;
+        }
+
+        if (!m_sock->connect(addr, m_connect_timeout_ms)) {
+            SYLAR_LOG_ERROR(g_logger) << "Failed to connect to "
+                                       << m_ip << ":" << m_port;
+            m_sock = nullptr;
+            m_is_connected = false;
+            return;
+        }
+
+        m_is_connected = true;
+        SYLAR_LOG_INFO(g_logger) << "SocketDeviceCommunicator connected to "
+                                  << m_ip << ":" << m_port;
+    } catch (const std::exception& e) {
+        SYLAR_LOG_ERROR(g_logger) << "SocketDeviceCommunicator connect exception: " << e.what();
+        m_is_connected = false;
+        m_sock = nullptr;
+    }
+}
+
+void SocketDeviceCommunicator::disconnect() {
+    if (!m_is_connected) {
+        SYLAR_LOG_WARN(g_logger) << "SocketDeviceCommunicator not connected";
+        return;
+    }
+
+    try {
+        if (m_sock) {
+            m_sock->close();
+            m_sock = nullptr;
+        }
+        m_is_connected = false;
+        SYLAR_LOG_INFO(g_logger) << "SocketDeviceCommunicator disconnected";
+    } catch (const std::exception& e) {
+        SYLAR_LOG_ERROR(g_logger) << "SocketDeviceCommunicator disconnect exception: " << e.what();
+    }
+}
+
+int SocketDeviceCommunicator::writeFixSize(const void* buffer, size_t length) {
+    if (!m_sock || !m_sock->isConnected()) {
+        return -1;
+    }
+
+    size_t offset = 0;
+    const char* p = static_cast<const char*>(buffer);
+    while (offset < length) {
+        int rt = m_sock->send(p + offset, length - offset, 0);
+        if (rt <= 0) {
+            return rt;
+        }
+        offset += rt;
+    }
+    return static_cast<int>(offset);
+}
+
+int SocketDeviceCommunicator::readFixSize(void* buffer, size_t length) {
+    if (!m_sock || !m_sock->isConnected()) {
+        return -1;
+    }
+
+    size_t offset = 0;
+    char* p = static_cast<char*>(buffer);
+    while (offset < length) {
+        int rt = m_sock->recv(p + offset, length - offset, 0);
+        if (rt <= 0) {
+            return rt;
+        }
+        offset += rt;
+    }
+    return static_cast<int>(offset);
+}
+
+void SocketDeviceCommunicator::send(struct sendCtx& ctx) {
+    if (!m_is_connected || !m_sock) {
+        SYLAR_LOG_ERROR(g_logger) << "Socket not connected";
+        if (ctx.complete_cb) {
+            ctx.complete_cb(NET_ERROR_CODE::NOT_CONNECTED, &ctx);
+        }
+        return;
+    }
+
+    if (!ctx.msg || ctx.msg_size == 0) {
+        SYLAR_LOG_ERROR(g_logger) << "Invalid message to send";
+        if (ctx.complete_cb) {
+            ctx.complete_cb(NET_ERROR_CODE::INVALID_PARAM, &ctx);
+        }
+        return;
+    }
+
+    std::function<void(size_t)> do_send;
+    do_send = [this, &ctx, &do_send](size_t retry_left) mutable {
+        SYLAR_LOG_DEBUG(g_logger) << "Sending socket message, size: " << ctx.msg_size
+                                   << ", retry left: " << retry_left;
+
+        int ret = writeFixSize(ctx.msg, ctx.msg_size);
+        if (ret <= 0) {
+            SYLAR_LOG_ERROR(g_logger) << "Failed to send data, ret=" << ret
+                                      << " errno=" << errno << " errstr=" << strerror(errno);
+            if (retry_left > 0) {
+                retry_left--;
+                if (m_io_mgr) {
+                    int fd = m_sock->getSocket();
+                    m_io_mgr->addEvent(fd, IOManager::WRITE, [do_send, retry_left]() mutable {
+                        do_send(retry_left);
+                    });
+                } else {
+                    do_send(retry_left);
+                }
+                return;
+            }
+
+            m_is_connected = false;
+            if (ctx.complete_cb) {
+                ctx.complete_cb(NET_ERROR_CODE::RETRY_EXHAUSTED, &ctx);
+            }
+            return;
+        }
+
+        SYLAR_LOG_INFO(g_logger) << "Sent " << ret << " bytes via Socket";
+        if (ctx.complete_cb) {
+            ctx.complete_cb(NET_ERROR_CODE::SUCCESS, &ctx);
+        }
+    };
+
+    if (m_io_mgr) {
+        int fd = m_sock->getSocket();
+        size_t retry_left = ctx.retry_cnt;
+        m_io_mgr->addEvent(fd, IOManager::WRITE, [do_send, retry_left]() mutable {
+            do_send(retry_left);
+        });
+    } else {
+        do_send(ctx.retry_cnt);
+    }
+}
+
+void SocketDeviceCommunicator::recv(struct recvCtx& ctx) {
+    if (!m_is_connected || !m_sock) {
+        SYLAR_LOG_ERROR(g_logger) << "Socket not connected";
+        if (ctx.complete_cb) {
+            ctx.complete_cb(NET_ERROR_CODE::NOT_CONNECTED, &ctx);
+        }
+        return;
+    }
+
+    if (!ctx.buf || ctx.buf_size == 0) {
+        SYLAR_LOG_ERROR(g_logger) << "Invalid buffer for receive";
+        if (ctx.complete_cb) {
+            ctx.complete_cb(NET_ERROR_CODE::INVALID_PARAM, &ctx);
+        }
+        return;
+    }
+
+    auto do_recv = [this, &ctx]() {
+        SYLAR_LOG_DEBUG(g_logger) << "Receiving socket message, buffer size: " << ctx.buf_size;
+        int ret = readFixSize((void*)ctx.buf, ctx.buf_size);
+        if (ret <= 0) {
+            SYLAR_LOG_ERROR(g_logger) << "Failed to receive data, ret=" << ret
+                                      << " errno=" << errno << " errstr=" << strerror(errno);
+            m_is_connected = false;
+            if (ctx.complete_cb) {
+                ctx.complete_cb(NET_ERROR_CODE::FAILED, &ctx);
+            }
+            return;
+        }
+        SYLAR_LOG_INFO(g_logger) << "Received " << ret << " bytes via Socket";
+        if (ctx.complete_cb) {
+            ctx.complete_cb(NET_ERROR_CODE::SUCCESS, &ctx);
+        }
+    };
+
+    if (m_io_mgr) {
+        int fd = m_sock->getSocket();
+        m_io_mgr->addEvent(fd, IOManager::READ, do_recv);
+    } else {
+        do_recv();
+    }
 }
 
 } // namespace device

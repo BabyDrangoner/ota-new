@@ -270,7 +270,7 @@ IPAddress::ptr IPAddress::Create(const char * address, uint32_t port){
 
 IPv4Address::ptr IPv4Address::Create(const char * address, uint32_t port){
     IPv4Address::ptr rt(new IPv4Address);
-    rt->m_addr.sin_port = byteswapOnLittleEndian(port);
+    rt->m_addr.sin_port = byteswapOnLittleEndian((uint16_t)port);
     int result = inet_pton(AF_INET, address, &rt->m_addr.sin_addr);
     if(result <= 0){
         SYLAR_LOG_ERROR(g_logger) << "IPv4Address::Create(" << address

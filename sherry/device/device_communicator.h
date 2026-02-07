@@ -133,6 +133,31 @@ private:
     IOManager::ptr m_io_mgr;
 };
 
+class SocketDeviceCommunicator : public DeviceCommnicator {
+public:
+    typedef std::shared_ptr<SocketDeviceCommunicator> ptr;
+
+    SocketDeviceCommunicator(const std::string& serv_ip,
+                             int serv_port,
+                             IOManager::ptr io_mgr = nullptr,
+                             uint64_t connect_timeout_ms = 5000);
+
+    virtual void connect() override;
+    virtual void disconnect() override;
+
+    virtual void send(struct sendCtx& ctx) override;
+    virtual void recv(struct recvCtx& ctx) override;
+
+private:
+    int writeFixSize(const void* buffer, size_t length);
+    int readFixSize(void* buffer, size_t length);
+
+private:
+    Socket::ptr m_sock;
+    IOManager::ptr m_io_mgr;
+    uint64_t m_connect_timeout_ms;
+};
+
 } // namespace device
 
 } // namespace sherry

@@ -91,9 +91,6 @@ set(LIB_SRC
     sherry/ota/ota_device.cc
     sherry/ota/ota_servlet.cc
 
-    sherry/device/ota_component.cc
-    sherry/device/ota_device_client.cc
-    sherry/device/ota_device_manager.cc
     sherry/device/device_communicator.cc
     sherry/device/device_camera.cc
     #sherry/device/device_component.cc

@@ -5,6 +5,12 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <atomic>
+#include <cstring>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 static sherry::Logger::ptr g_logger = SYLAR_LOG_NAME("system");
 
@@ -227,6 +233,128 @@ void test_http_custom_connection() {
     SYLAR_LOG_INFO(g_logger) << "HTTP Custom Connection test completed";
 }
 
+// ===============================
+// Test raw TCP Socket Device Communicator (local echo server)
+// ===============================
+static uint16_t launch_local_echo_server(std::thread& server_thread) {
+    int listen_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_fd < 0) {
+        throw std::runtime_error("failed to create listen socket");
+    }
+
+    int opt = 1;
+    ::setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(0);
+
+    if (::bind(listen_fd, (sockaddr*)&addr, sizeof(addr)) != 0) {
+        ::close(listen_fd);
+        throw std::runtime_error("failed to bind echo server");
+    }
+
+    socklen_t len = sizeof(addr);
+    if (::getsockname(listen_fd, (sockaddr*)&addr, &len) != 0) {
+        ::close(listen_fd);
+        throw std::runtime_error("failed to getsockname");
+    }
+    uint16_t port = ntohs(addr.sin_port);
+
+    if (::listen(listen_fd, 1) != 0) {
+        ::close(listen_fd);
+        throw std::runtime_error("failed to listen echo server");
+    }
+
+    server_thread = std::thread([listen_fd]() {
+        int client_fd = ::accept(listen_fd, nullptr, nullptr);
+        if (client_fd >= 0) {
+            char buf[4096];
+            int n = ::recv(client_fd, buf, sizeof(buf), 0);
+            if (n > 0) {
+                int off = 0;
+                while (off < n) {
+                    int s = ::send(client_fd, buf + off, n - off, 0);
+                    if (s <= 0) {
+                        break;
+                    }
+                    off += s;
+                }
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+            ::close(client_fd);
+        }
+        ::close(listen_fd);
+    });
+
+    return port;
+}
+
+void test_socket_device_communicator() {
+    SYLAR_LOG_INFO(g_logger) << "========== Testing Socket Device Communicator ==========";
+
+    std::thread server_thread;
+    uint16_t port = 0;
+    try {
+        port = launch_local_echo_server(server_thread);
+    } catch (const std::exception& e) {
+        SYLAR_LOG_ERROR(g_logger) << "Failed to launch echo server: " << e.what();
+        return;
+    }
+
+    auto send_msg = std::make_shared<std::string>("hello-echo");
+    auto recv_msg = std::make_shared<std::string>(send_msg->size(), '\0');
+
+    auto sock_comm = std::make_shared<sherry::device::SocketDeviceCommunicator>(
+        "127.0.0.1", (int)port, nullptr, 3000);
+
+    sock_comm->connect();
+    if (!sock_comm->is_connected()) {
+        SYLAR_LOG_ERROR(g_logger) << "Failed to connect to local echo server";
+        if (server_thread.joinable()) {
+            server_thread.join();
+        }
+        return;
+    }
+
+    sherry::device::sendCtx send_ctx(send_msg->c_str(), send_msg->size(), 1);
+    send_ctx.complete_cb = [](sherry::device::NET_ERROR_CODE code, sherry::device::sendCtx*) {
+        if (code == sherry::device::NET_ERROR_CODE::SUCCESS) {
+            SYLAR_LOG_INFO(g_logger) << "Socket send callback: SUCCESS";
+        } else {
+            SYLAR_LOG_ERROR(g_logger) << "Socket send callback: FAILED, code="
+                                       << static_cast<int>(code);
+        }
+    };
+    sock_comm->send(send_ctx);
+
+    sherry::device::recvCtx recv_ctx(recv_msg->data(), recv_msg->size());
+    recv_ctx.complete_cb = [recv_msg, send_msg](sherry::device::NET_ERROR_CODE code,
+                                                sherry::device::recvCtx* ctx) {
+        if (code == sherry::device::NET_ERROR_CODE::SUCCESS) {
+            SYLAR_LOG_INFO(g_logger) << "Socket recv callback: SUCCESS";
+            std::string got(recv_msg->data(), ctx->buf_size);
+            SYLAR_LOG_INFO(g_logger) << "Echo response: " << got;
+            if (got != *send_msg) {
+                SYLAR_LOG_ERROR(g_logger) << "Echo mismatch";
+            }
+        } else {
+            SYLAR_LOG_ERROR(g_logger) << "Socket recv callback: FAILED, code="
+                                       << static_cast<int>(code);
+        }
+    };
+    sock_comm->recv(recv_ctx);
+
+    sock_comm->disconnect();
+    if (server_thread.joinable()) {
+        server_thread.join();
+    }
+
+    SYLAR_LOG_INFO(g_logger) << "Socket Device Communicator test completed";
+}
+
 int main(int argc, char** argv) {
     SYLAR_LOG_INFO(g_logger) << "========================================";
     SYLAR_LOG_INFO(g_logger) << "Device Communicator Test Starting...";
@@ -255,6 +383,15 @@ int main(int argc, char** argv) {
         test_http_custom_connection();
     } catch (const std::exception& e) {
         SYLAR_LOG_ERROR(g_logger) << "HTTP custom test exception: " << e.what();
+    }
+
+    SYLAR_LOG_INFO(g_logger) << "\n";
+
+    // 测试 Socket (本地 echo)
+    try {
+        test_socket_device_communicator();
+    } catch (const std::exception& e) {
+        SYLAR_LOG_ERROR(g_logger) << "Socket test exception: " << e.what();
     }
     
     SYLAR_LOG_INFO(g_logger) << "========================================";
