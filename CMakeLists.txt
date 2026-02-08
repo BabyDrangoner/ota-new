@@ -93,6 +93,7 @@ set(LIB_SRC
 
     sherry/device/device_communicator.cc
     sherry/device/device_camera.cc
+    sherry/device/device_engine.cc
     #sherry/device/device_component.cc
 
     sherry/http/http11_parser.rl.cc
@@ -169,9 +170,9 @@ add_sherry_executable(test_redis)
 add_sherry_executable(test_hash)
 add_sherry_executable(test_mqtt_client)
 add_sherry_executable(test_http_connection)
-add_sherry_executable(test_ota_device_client)
 add_sherry_executable(test_device_communicator)
 add_sherry_executable(test_device_camera)
+add_sherry_executable(test_device_engine)
 
 
 add_executable(echo_server examples/echo_server.cc)
