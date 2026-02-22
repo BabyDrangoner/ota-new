@@ -1,0 +1,102 @@
+# ICP (Image Control Plane) 配置文件
+# 
+# 核心设计原则:
+# - Latest-Only: 同一车辆的旧消息/旧推理可被立即作废
+# - Early Drop: 只要从 header 能判断过期, 立即丢弃整条消息
+# - No Queue for Observations: 每车仅维护一个可覆盖的 RxSlot
+
+# ===============================
+# 消息配置
+# ===============================
+
+# 单条消息最大长度 (bytes)
+# 默认 10MB, 需要能容纳多张高分辨率图片
+max_msg_size: 10485760
+
+# 每条消息最大图片数量
+max_images_per_msg: 4
+
+# ===============================
+# 车辆控制配置
+# ===============================
+
+# 最大支持的车辆数
+# car_id 范围: 0 到 max_cars-1
+max_cars: 100
+
+# 同车最小提交间隔 (毫秒)
+# 防止 abort 风暴, 0 表示不限制
+min_submit_interval_ms: 100
+
+# ===============================
+# 线程配置
+# ===============================
+
+# IO 线程数 (处理 socket 读写)
+io_threads: 2
+
+# 控制线程数 (处理 Latest-Only 逻辑, abort, submit)
+control_threads: 1
+
+# HTTP 线程数 (处理 vLLM 请求)
+http_threads: 4
+
+# ===============================
+# vLLM 配置
+# ===============================
+vllm:
+  # vLLM 服务端点
+  endpoint: "http://localhost:8000"
+  
+  # 模型名称
+  model: "llava"
+  
+  # 最大生成 token 数
+  max_tokens: 512
+  
+  # 温度参数 (0 表示贪婪解码)
+  temperature: 0.0
+  
+  # 请求超时 (毫秒)
+  timeout_ms: 30000
+  
+  # 是否启用流式输出
+  enable_stream: true
+  
+  # 每个 prompt 最大图片数
+  limit_mm_per_prompt: 4
+  
+  # HTTP 最大连接数
+  max_connections: 10
+  
+  # 连接超时 (毫秒)
+  connection_timeout_ms: 5000
+
+# ===============================
+# 服务器配置
+# ===============================
+server:
+  # 绑定地址
+  bind_address: "0.0.0.0"
+  
+  # 绑定端口
+  bind_port: 9000
+  
+  # 接收超时 (毫秒)
+  recv_timeout_ms: 60000
+  
+  # 最大连接数
+  max_connections: 100
+
+# ===============================
+# 可观测性配置
+# ===============================
+
+# 是否启用指标收集
+enable_metrics: true
+
+# 指标输出间隔 (毫秒)
+metrics_interval_ms: 5000
+
+# 是否将图片编码为 base64
+encode_images_base64: true

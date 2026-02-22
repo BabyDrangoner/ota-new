@@ -13,6 +13,7 @@
 #include "sherry/thread.h"
 
 #include "sherry/device/device_camera.h"
+#include "sherry/icp/icp_protocol.h"
 
 namespace sherry{
 namespace device{
@@ -49,9 +50,21 @@ public:
     bool isRunning() const { return m_running.load(); }
 
     void setServerMessageCallback(std::function<void(const std::string&)> cb);
+    
+    /**
+     * @brief 设置 ICP 结果回调
+     * @param cb 接收到 ICP 输出消息时的回调函数
+     */
+    void setIcpResultCallback(std::function<void(const icp::OutputMessage&)> cb);
 
 private:
     bool connectSocket();
+    
+    /**
+     * @brief 构建 ICP 协议格式的消息
+     * @return 构建好的消息数据
+     */
+    std::vector<uint8_t> buildIcpMessage();
     void closeSocket();
 
     void sendLoop();
@@ -73,6 +86,7 @@ private:
 
     std::atomic<bool> m_running{false};
     std::function<void(const std::string&)> m_on_server_msg;
+    std::function<void(const icp::OutputMessage&)> m_on_icp_result;
 
     uint64_t m_car_id{0};              // 车辆ID
     std::atomic<uint64_t> m_seq{0};    // 单车递增序列号

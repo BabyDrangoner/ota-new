@@ -1,0 +1,103 @@
+/**
+ * @file icp_server_main.cc
+ * @brief ICP Server 独立启动程序
+ * 
+ * 用法: ./icp_server [port]
+ * 默认端口: 9000
+ */
+
+#include "sherry/icp/icp.h"
+#include "sherry/log.h"
+#include "sherry/iomanager.h"
+
+#include <iostream>
+#include <csignal>
+#include <atomic>
+
+using namespace sherry;
+using namespace sherry::icp;
+
+static Logger::ptr g_logger = SYLAR_LOG_NAME("icp_server");
+static std::atomic<bool> g_running{true};
+static IcpService::ptr g_service;
+
+void signalHandler(int signum) {
+    SYLAR_LOG_INFO(g_logger) << "收到信号 " << signum << ", 正在停止服务...";
+    g_running = false;
+    if (g_service) {
+        g_service->stop();
+    }
+}
+
+int main(int argc, char** argv) {
+    // 解析端口参数
+    uint16_t port = 8000;
+    if (argc > 1) {
+        port = static_cast<uint16_t>(std::atoi(argv[1]));
+    }
+
+    // 设置信号处理
+    signal(SIGINT, signalHandler);
+    signal(SIGTERM, signalHandler);
+
+    SYLAR_LOG_INFO(g_logger) << "========================================";
+    SYLAR_LOG_INFO(g_logger) << "       ICP Server 启动程序";
+    SYLAR_LOG_INFO(g_logger) << "========================================";
+
+    // 创建配置
+    auto config = IcpConfig::getDefault();
+    config->server.bind_port = port;
+    config->server.bind_address = "0.0.0.0";
+    
+    // vLLM配置 (模拟模式)
+    config->vllm.endpoint = "http://localhost:8000";
+    config->vllm.timeout_ms = 5000;
+    
+    // 线程配置
+    config->io_threads = 2;
+    config->control_threads = 1;
+    config->http_threads = 2;
+
+    // 验证配置
+    std::string err = config->validate();
+    if (!err.empty()) {
+        SYLAR_LOG_ERROR(g_logger) << "配置验证失败: " << err;
+        return 1;
+    }
+
+    SYLAR_LOG_INFO(g_logger) << "配置:";
+    SYLAR_LOG_INFO(g_logger) << "  - 绑定地址: " << config->server.bind_address 
+                              << ":" << config->server.bind_port;
+    SYLAR_LOG_INFO(g_logger) << "  - IO线程数: " << config->io_threads;
+    SYLAR_LOG_INFO(g_logger) << "  - 最大连接数: " << config->server.max_connections;
+
+    // 创建服务
+    g_service = std::make_shared<IcpService>(config);
+    
+    if (!g_service->init()) {
+        SYLAR_LOG_ERROR(g_logger) << "服务初始化失败";
+        return 1;
+    }
+
+    if (!g_service->start()) {
+        SYLAR_LOG_ERROR(g_logger) << "服务启动失败";
+        return 1;
+    }
+
+    SYLAR_LOG_INFO(g_logger) << "ICP Server 已启动，监听端口 " << port;
+    SYLAR_LOG_INFO(g_logger) << "按 Ctrl+C 停止服务";
+    SYLAR_LOG_INFO(g_logger) << "----------------------------------------";
+
+    // 主循环 - 等待停止信号
+    while (g_running && g_service->isRunning()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    // 停止服务
+    SYLAR_LOG_INFO(g_logger) << "正在关闭服务...";
+    g_service->stop();
+    g_service.reset();
+
+    SYLAR_LOG_INFO(g_logger) << "ICP Server 已停止";
+    return 0;
+}

@@ -3,6 +3,7 @@
 #include "sherry/address.h"
 #include "sherry/endian.h"
 #include "sherry/log.h"
+#include "sherry/icp/icp_protocol.h"
 
 #include <chrono>
 #include <cstring>
@@ -13,33 +14,15 @@ namespace sherry {
 namespace device {
 
 static sherry::Logger::ptr g_logger = SYLAR_LOG_NAME("system");
+static const char* TAG = "DeviceEngine";
+
+// 使用 ICP 协议的类型（使用完全限定名称避免与 device::ImageType 冲突）
+using icp::MessageHeader;
+using icp::ImageMeta;
+using icp::OutputMessage;
+using icp::MessageBuilder;
 
 namespace {
-
-#pragma pack(push, 1)
-struct FrameHeader {
-    uint32_t message_size;  // 消息总大小（不含header）
-    uint16_t image_nums;    // 图片数量
-    uint64_t car_id;        // 车辆ID
-    uint64_t seq;           // 单车递增序列号
-};
-#pragma pack(pop)
-
-static FrameHeader toNetwork(FrameHeader h) {
-    h.message_size = sherry::byteswapOnLittleEndian(h.message_size);
-    h.image_nums = sherry::byteswapOnLittleEndian(h.image_nums);
-    h.car_id = sherry::byteswapOnLittleEndian(h.car_id);
-    h.seq = sherry::byteswapOnLittleEndian(h.seq);
-    return h;
-}
-
-static FrameHeader toHost(FrameHeader h) {
-    h.message_size = sherry::byteswapOnLittleEndian(h.message_size);
-    h.image_nums = sherry::byteswapOnLittleEndian(h.image_nums);
-    h.car_id = sherry::byteswapOnLittleEndian(h.car_id);
-    h.seq = sherry::byteswapOnLittleEndian(h.seq);
-    return h;
-}
 
 } // namespace
 
@@ -57,6 +40,80 @@ DeviceEngine::~DeviceEngine() {
 
 void DeviceEngine::setServerMessageCallback(std::function<void(const std::string&)> cb) {
     m_on_server_msg = std::move(cb);
+}
+
+void DeviceEngine::setIcpResultCallback(std::function<void(const icp::OutputMessage&)> cb) {
+    m_on_icp_result = std::move(cb);
+}
+
+std::vector<uint8_t> DeviceEngine::buildIcpMessage() {
+    // 获取相机需要的缓冲区大小
+    size_t cam_buf_size = m_camera->get_buf_len();
+    if (cam_buf_size == 0) {
+        return {};
+    }
+    
+    // 分配临时缓冲区获取相机数据
+    std::vector<char> cam_buf(cam_buf_size);
+    int mk = m_camera->make_images(cam_buf.data(), cam_buf.size());
+    if (mk != 0) {
+        SYLAR_LOG_ERROR(g_logger) << "[" << TAG << "] make_images failed ret=" << mk;
+        return {};
+    }
+    
+    // 使用 MessageBuilder 构建 ICP 消息
+    MessageBuilder builder;
+    builder.setCarId(static_cast<uint32_t>(m_car_id));
+    builder.setSeq(m_seq.fetch_add(1));
+    
+    // 获取当前时间戳
+    auto now = std::chrono::system_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()).count();
+    builder.setTimestamp(static_cast<uint64_t>(ms));
+    
+    // 解析相机输出，转换为 ICP 格式
+    // Camera 输出格式: [image_header(size_t + ImageType) + data] * N
+    const char* ptr = cam_buf.data();
+    const char* end = cam_buf.data() + cam_buf.size();
+    int image_count = m_camera->get_image_nums();
+    
+    for (int i = 0; i < image_count && ptr < end; ++i) {
+        // 读取 Camera 的 image_header
+        SingleCamera::image_header cam_header;
+        if (ptr + sizeof(cam_header) > end) {
+            break;
+        }
+        std::memcpy(&cam_header, ptr, sizeof(cam_header));
+        ptr += sizeof(cam_header);
+        
+        // 读取图像数据
+        if (ptr + cam_header.image_size > end) {
+            break;
+        }
+        
+        // 转换图像类型：device::ImageType -> icp::ImageType
+        icp::ImageType icp_type = icp::ImageType::UNKNOWN;
+        switch (cam_header.type) {
+            case device::ImageType::PNG:
+            case device::ImageType::JPG:
+                icp_type = icp::ImageType::RGB;
+                break;
+            case device::ImageType::DEEP:
+                icp_type = icp::ImageType::DEPTH;
+                break;
+            default:
+                icp_type = icp::ImageType::UNKNOWN;
+                break;
+        }
+        
+        builder.addImage(icp_type, 
+                        reinterpret_cast<const uint8_t*>(ptr), 
+                        cam_header.image_size);
+        ptr += cam_header.image_size;
+    }
+    
+    return builder.build();
 }
 
 bool DeviceEngine::connectSocket() {
@@ -92,6 +149,11 @@ void DeviceEngine::closeSocket() {
         m_stream = nullptr;
     }
     if (m_sock) {
+        // shutdown() 先于 close()，可以可靠地唤醒阻塞在 recv/send 上的线程
+        int fd = m_sock->getSocket();
+        if (fd >= 0) {
+            ::shutdown(fd, SHUT_RDWR);
+        }
         m_sock->close();
         m_sock = nullptr;
     }
@@ -184,47 +246,27 @@ void DeviceEngine::stop() {
 }
 
 void DeviceEngine::sendLoop() {
-    std::vector<char> payload;
-
     while (m_running.load()) {
         if (!m_sock || !m_sock->isConnected()) {
-            SYLAR_LOG_WARN(g_logger) << "DeviceEngine(send): socket disconnected";
+            SYLAR_LOG_WARN(g_logger) << "[" << TAG << "] sendLoop: socket disconnected";
             break;
         }
 
-        size_t need = m_camera->get_buf_len();
-        if (need == 0) {
+        // 构建 ICP 协议格式的消息
+        std::vector<uint8_t> message = buildIcpMessage();
+        if (message.empty()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(m_opt.send_interval_ms));
             continue;
         }
 
-        payload.resize(need);
-        int mk = m_camera->make_images(payload.data(), payload.size());
-        if (mk != 0) {
-            SYLAR_LOG_ERROR(g_logger) << "DeviceEngine(send): make_images failed ret=" << mk;
-            std::this_thread::sleep_for(std::chrono::milliseconds(m_opt.send_interval_ms));
-            continue;
-        }
-
-        FrameHeader h;
-        h.message_size = static_cast<uint32_t>(payload.size());
-        h.image_nums = static_cast<uint16_t>(m_camera->get_image_nums());
-        h.car_id = m_car_id;
-        h.seq = m_seq.fetch_add(1);
-        FrameHeader net = toNetwork(h);
-
-        int ret = writeFixSize(&net, sizeof(net));
+        // 发送完整消息（ICP 协议包含 header）
+        int ret = writeFixSize(message.data(), message.size());
         if (ret <= 0) {
-            SYLAR_LOG_ERROR(g_logger) << "DeviceEngine(send): write header failed ret=" << ret;
+            SYLAR_LOG_ERROR(g_logger) << "[" << TAG << "] sendLoop: write failed ret=" << ret;
             break;
         }
 
-        ret = writeFixSize(payload.data(), payload.size());
-        if (ret <= 0) {
-            SYLAR_LOG_ERROR(g_logger) << "DeviceEngine(send): write payload failed ret=" << ret;
-            break;
-        }
-
+        SYLAR_LOG_DEBUG(g_logger) << "[" << TAG << "] sendLoop: sent ICP message, size=" << message.size();
         std::this_thread::sleep_for(std::chrono::milliseconds(m_opt.send_interval_ms));
     }
 
@@ -233,41 +275,51 @@ void DeviceEngine::sendLoop() {
 }
 
 void DeviceEngine::recvLoop() {
+    // ICP 响应使用简单的 JSON 格式，前面有 4 字节长度
     while (m_running.load()) {
         if (!m_sock || !m_sock->isConnected()) {
             break;
         }
 
-        FrameHeader net_h;
-        int ret = readFixSize(&net_h, sizeof(net_h));
+        // 读取消息长度（4 字节）
+        uint32_t msg_len = 0;
+        int ret = readFixSize(&msg_len, sizeof(msg_len));
         if (ret <= 0) {
-            SYLAR_LOG_WARN(g_logger) << "DeviceEngine(recv): read header failed ret=" << ret;
+            SYLAR_LOG_WARN(g_logger) << "[" << TAG << "] recvLoop: read length failed ret=" << ret;
             break;
         }
 
-        FrameHeader h = toHost(net_h);
-        if (h.message_size > m_opt.max_payload_bytes) {
-            SYLAR_LOG_ERROR(g_logger) << "DeviceEngine(recv): payload too large len=" << h.message_size;
+        if (msg_len > m_opt.max_payload_bytes) {
+            SYLAR_LOG_ERROR(g_logger) << "[" << TAG << "] recvLoop: message too large len=" << msg_len;
             break;
         }
 
-        std::vector<char> payload;
-        payload.resize(h.message_size);
-        if (h.message_size > 0) {
+        // 读取 JSON 消息体
+        std::vector<char> payload(msg_len);
+        if (msg_len > 0) {
             ret = readFixSize(payload.data(), payload.size());
             if (ret <= 0) {
-                SYLAR_LOG_WARN(g_logger) << "DeviceEngine(recv): read payload failed ret=" << ret;
+                SYLAR_LOG_WARN(g_logger) << "[" << TAG << "] recvLoop: read payload failed ret=" << ret;
                 break;
             }
         }
 
-        // 处理接收到的消息
-        std::string msg(payload.data(), payload.data() + payload.size());
+        // 解析 OutputMessage
+        std::string json_str(payload.data(), payload.size());
+        
+        // 尝试调用 ICP 结果回调
+        if (m_on_icp_result) {
+            OutputMessage output = OutputMessage::fromJson(json_str);
+            m_on_icp_result(output);
+        }
+        
+        // 也调用旧的回调（兼容性）
         if (m_on_server_msg) {
-            m_on_server_msg(msg);
-        } else {
-            SYLAR_LOG_INFO(g_logger) << "DeviceEngine(recv): msg from car_id=" << h.car_id 
-                                     << " seq=" << h.seq << " len=" << payload.size();
+            m_on_server_msg(json_str);
+        }
+        
+        if (!m_on_icp_result && !m_on_server_msg) {
+            SYLAR_LOG_INFO(g_logger) << "[" << TAG << "] recvLoop: received response: " << json_str;
         }
     }
 

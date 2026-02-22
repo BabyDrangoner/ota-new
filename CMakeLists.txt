@@ -111,6 +111,16 @@ set(LIB_SRC
     sherry/db/redis_util.cc
 
     sherry/streams/zlib_stream.cc
+
+    # ICP 模块
+    sherry/icp/icp_protocol.cc
+    sherry/icp/icp_rx_slot.cc
+    sherry/icp/icp_car_state.cc
+    sherry/icp/icp_config.cc
+    sherry/icp/icp_metrics.cc
+    sherry/icp/icp_vllm_client.cc
+    sherry/icp/icp_controller.cc
+    sherry/icp/icp_server.cc
 )
 
 # ===============================
@@ -174,11 +184,34 @@ add_sherry_executable(test_device_communicator)
 add_sherry_executable(test_device_camera)
 add_sherry_executable(test_device_engine)
 
+# ICP 模块测试
+add_sherry_executable(test_icp)
+add_sherry_executable(test_icp_server)
+add_sherry_executable(test_icp_client)
+
+# Device-ICP 联调测试
+add_sherry_executable(test_device_icp_integration)
+
 
 add_executable(echo_server examples/echo_server.cc)
 add_dependencies(echo_server sherry)
 force_redefine_file_macro_for_sources(echo_server)
 target_link_libraries(echo_server ${LIBS})
+
+# ===============================
+# Sample 示例程序
+# ===============================
+# ICP Server 示例
+add_executable(icp_server sample/icp/icp_server_main.cc)
+add_dependencies(icp_server sherry)
+force_redefine_file_macro_for_sources(icp_server)
+target_link_libraries(icp_server ${LIBS})
+
+# Device Client 示例
+add_executable(device_client sample/icp/device_client_main.cc)
+add_dependencies(device_client sherry)
+force_redefine_file_macro_for_sources(device_client)
+target_link_libraries(device_client ${LIBS})
 
 # ===============================
 # 输出路径
