@@ -48,23 +48,36 @@ vllm:
   # vLLM 服务端点
   endpoint: "http://localhost:8000"
   
-  # 模型名称
-  model: "llava"
+  # 模型名称 (Qwen3-VL-4B 视觉语言模型)
+  model: "Qwen/Qwen3-VL-4B"
   
   # 最大生成 token 数
   max_tokens: 512
   
-  # 温度参数 (0 表示贪婪解码)
-  temperature: 0.0
+  # 温度参数
+  temperature: 0.7
+  
+  # Top-P 采样参数
+  top_p: 0.8
+  
+  # 重复惩罚参数
+  repetition_penalty: 1.05
   
   # 请求超时 (毫秒)
   timeout_ms: 30000
   
-  # 是否启用流式输出
-  enable_stream: true
+  # 是否启用流式输出 (Qwen3-VL 建议关闭以获取完整响应)
+  enable_stream: false
   
   # 每个 prompt 最大图片数
   limit_mm_per_prompt: 4
+  
+  # Qwen3-VL 图片分辨率控制
+  min_pixels: 200704    # 256 * 28 * 28
+  max_pixels: 1003520   # 1280 * 28 * 28
+  
+  # 系统提示词
+  system_prompt: "You are a helpful assistant."
   
   # HTTP 最大连接数
   max_connections: 10

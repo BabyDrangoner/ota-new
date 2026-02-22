@@ -13,12 +13,21 @@ namespace icp {
  */
 struct VllmConfig {
     std::string endpoint = "http://localhost:8000";   // vLLM 服务地址
-    std::string model = "default";                     // 模型名称
+    std::string model = "Qwen/Qwen3-VL-4B";           // 模型名称
     uint32_t max_tokens = 512;                         // 最大生成token数
-    float temperature = 0.0f;                          // 温度参数
+    float temperature = 0.7f;                          // 温度参数
+    float top_p = 0.8f;                                // Top-P 采样参数
+    float repetition_penalty = 1.05f;                  // 重复惩罚参数
     uint32_t timeout_ms = 30000;                       // 请求超时(毫秒)
-    bool enable_stream = true;                         // 是否启用流式输出
+    bool enable_stream = false;                        // 是否启用流式输出
     uint32_t limit_mm_per_prompt = 4;                  // 每个prompt最大图片数
+    
+    // Qwen3-VL 图片分辨率控制
+    uint32_t min_pixels = 256 * 28 * 28;               // 最小像素数
+    uint32_t max_pixels = 1280 * 28 * 28;              // 最大像素数
+    
+    // 系统提示词
+    std::string system_prompt = "You are a helpful assistant.";  // 系统提示
     
     // HTTP 连接池配置
     uint32_t max_connections = 10;                     // 最大连接数

@@ -118,6 +118,21 @@ IcpConfig::ptr IcpConfig::loadFromFile(const std::string& filepath) {
             if (vllm_node["connection_timeout_ms"]) {
                 config->vllm.connection_timeout_ms = vllm_node["connection_timeout_ms"].as<uint32_t>();
             }
+            if (vllm_node["top_p"]) {
+                config->vllm.top_p = vllm_node["top_p"].as<float>();
+            }
+            if (vllm_node["repetition_penalty"]) {
+                config->vllm.repetition_penalty = vllm_node["repetition_penalty"].as<float>();
+            }
+            if (vllm_node["min_pixels"]) {
+                config->vllm.min_pixels = vllm_node["min_pixels"].as<uint32_t>();
+            }
+            if (vllm_node["max_pixels"]) {
+                config->vllm.max_pixels = vllm_node["max_pixels"].as<uint32_t>();
+            }
+            if (vllm_node["system_prompt"]) {
+                config->vllm.system_prompt = vllm_node["system_prompt"].as<std::string>();
+            }
         }
         
         // 解析服务器配置
@@ -182,9 +197,14 @@ bool IcpConfig::saveToFile(const std::string& filepath) const {
         out << YAML::Key << "model" << YAML::Value << vllm.model;
         out << YAML::Key << "max_tokens" << YAML::Value << vllm.max_tokens;
         out << YAML::Key << "temperature" << YAML::Value << vllm.temperature;
+        out << YAML::Key << "top_p" << YAML::Value << vllm.top_p;
+        out << YAML::Key << "repetition_penalty" << YAML::Value << vllm.repetition_penalty;
         out << YAML::Key << "timeout_ms" << YAML::Value << vllm.timeout_ms;
         out << YAML::Key << "enable_stream" << YAML::Value << vllm.enable_stream;
         out << YAML::Key << "limit_mm_per_prompt" << YAML::Value << vllm.limit_mm_per_prompt;
+        out << YAML::Key << "min_pixels" << YAML::Value << vllm.min_pixels;
+        out << YAML::Key << "max_pixels" << YAML::Value << vllm.max_pixels;
+        out << YAML::Key << "system_prompt" << YAML::Value << vllm.system_prompt;
         out << YAML::Key << "max_connections" << YAML::Value << vllm.max_connections;
         out << YAML::Key << "connection_timeout_ms" << YAML::Value << vllm.connection_timeout_ms;
         out << YAML::EndMap;

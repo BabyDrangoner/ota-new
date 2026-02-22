@@ -87,7 +87,8 @@ bool VllmClient::init(IOManager* io_manager) {
     m_running.store(true, std::memory_order_release);
     
     SYLAR_LOG_INFO(g_logger) << "VllmClient initialized with endpoint: " 
-                              << m_config.endpoint;
+                              << m_config.endpoint
+                              << " model: " << m_config.model;
     return true;
 }
 
@@ -154,21 +155,35 @@ std::string VllmClient::buildRequestBody(const VllmRequest& request) {
     oss << "  \"model\": \"" << m_config.model << "\",\n";
     oss << "  \"max_tokens\": " << m_config.max_tokens << ",\n";
     oss << "  \"temperature\": " << m_config.temperature << ",\n";
+    oss << "  \"top_p\": " << m_config.top_p << ",\n";
+    oss << "  \"repetition_penalty\": " << m_config.repetition_penalty << ",\n";
     oss << "  \"stream\": " << (m_config.enable_stream ? "true" : "false") << ",\n";
     
-    // 构建messages数组(OpenAI Vision API格式)
+    // 构建messages数组 (Qwen3-VL OpenAI Vision API格式)
     oss << "  \"messages\": [\n";
+    
+    // system 消息
+    if (!m_config.system_prompt.empty()) {
+        oss << "    {\n";
+        oss << "      \"role\": \"system\",\n";
+        oss << "      \"content\": \"" << m_config.system_prompt << "\"\n";
+        oss << "    },\n";
+    }
+    
+    // user 消息
     oss << "    {\n";
     oss << "      \"role\": \"user\",\n";
     oss << "      \"content\": [\n";
     
-    // 添加图片
+    // 添加图片 (Qwen3-VL格式: image_url 带 min_pixels/max_pixels)
     for (size_t i = 0; i < request.images_base64.size(); ++i) {
         oss << "        {\n";
         oss << "          \"type\": \"image_url\",\n";
         oss << "          \"image_url\": {\n";
         oss << "            \"url\": \"data:image/jpeg;base64," 
-            << request.images_base64[i] << "\"\n";
+            << request.images_base64[i] << "\",\n";
+        oss << "            \"min_pixels\": " << m_config.min_pixels << ",\n";
+        oss << "            \"max_pixels\": " << m_config.max_pixels << "\n";
         oss << "          }\n";
         oss << "        }";
         if (i < request.images_base64.size() - 1 || !request.prompt.empty()) {
@@ -315,38 +330,143 @@ VllmResult VllmClient::parseResponse(const std::string& request_id,
     result.request_id = request_id;
     result.complete_time_ms = getCurrentTimeMs();
     
-    // 简单的JSON解析(实际生产应使用JSON库)
-    // 查找 "content": "..." 或 "text": "..."
+    // 解析 vLLM OpenAI-compatible 响应格式 (Qwen3-VL-4B)
+    // 标准响应结构:
+    // {
+    //   "choices": [{
+    //     "message": { "content": "..." },
+    //     "finish_reason": "stop"
+    //   }],
+    //   "usage": { "completion_tokens": N, ... }
+    // }
     
-    size_t content_pos = response_body.find("\"content\":");
-    if (content_pos != std::string::npos) {
-        size_t start = response_body.find("\"", content_pos + 10);
-        if (start != std::string::npos) {
-            size_t end = start + 1;
-            // 处理转义字符
-            while (end < response_body.size()) {
-                if (response_body[end] == '\\') {
-                    end += 2;  // 跳过转义字符
-                } else if (response_body[end] == '"') {
-                    break;
-                } else {
-                    ++end;
+    SYLAR_LOG_DEBUG(g_logger) << "VllmClient parseResponse body (first 500 chars): "
+                               << response_body.substr(0, 500);
+    
+    // 1. 先尝试解析 "choices" -> "message" -> "content" (标准 chat completion 格式)
+    bool found_content = false;
+    size_t choices_pos = response_body.find("\"choices\"");
+    if (choices_pos != std::string::npos) {
+        // 在 choices 内查找 message.content
+        size_t message_pos = response_body.find("\"message\"", choices_pos);
+        if (message_pos != std::string::npos) {
+            size_t content_pos = response_body.find("\"content\"", message_pos);
+            if (content_pos != std::string::npos) {
+                // 跳过 "content": 找到值的开头
+                size_t colon_pos = response_body.find(':', content_pos + 9);
+                if (colon_pos != std::string::npos) {
+                    // 跳过空白
+                    size_t val_start = colon_pos + 1;
+                    while (val_start < response_body.size() && 
+                           (response_body[val_start] == ' ' || response_body[val_start] == '\n' ||
+                            response_body[val_start] == '\r' || response_body[val_start] == '\t')) {
+                        val_start++;
+                    }
+                    
+                    if (val_start < response_body.size()) {
+                        if (response_body[val_start] == '"') {
+                            // 字符串值 - 提取内容, 处理转义字符
+                            size_t end = val_start + 1;
+                            while (end < response_body.size()) {
+                                if (response_body[end] == '\\') {
+                                    end += 2;  // 跳过转义字符
+                                } else if (response_body[end] == '"') {
+                                    break;
+                                } else {
+                                    ++end;
+                                }
+                            }
+                            result.output_text = response_body.substr(val_start + 1, end - val_start - 1);
+                            found_content = true;
+                        } else if (response_body.compare(val_start, 4, "null") == 0) {
+                            // content 为 null (thinking 模式可能出现)
+                            result.output_text = "";
+                            found_content = true;
+                        }
+                    }
                 }
             }
-            result.output_text = response_body.substr(start + 1, end - start - 1);
-            result.status = VllmResult::Status::SUCCESS;
         }
     }
     
-    if (result.output_text.empty()) {
+    // 2. 回退: 直接搜索 "content" 字段
+    if (!found_content) {
+        size_t content_pos = response_body.find("\"content\":");
+        if (content_pos != std::string::npos) {
+            size_t start = response_body.find("\"", content_pos + 10);
+            if (start != std::string::npos) {
+                size_t end = start + 1;
+                while (end < response_body.size()) {
+                    if (response_body[end] == '\\') {
+                        end += 2;
+                    } else if (response_body[end] == '"') {
+                        break;
+                    } else {
+                        ++end;
+                    }
+                }
+                result.output_text = response_body.substr(start + 1, end - start - 1);
+                found_content = true;
+            }
+        }
+    }
+    
+    // 3. 尝试提取 usage.completion_tokens 作为 token_count
+    size_t usage_pos = response_body.find("\"completion_tokens\"");
+    if (usage_pos != std::string::npos) {
+        size_t colon = response_body.find(':', usage_pos + 19);
+        if (colon != std::string::npos) {
+            size_t num_start = colon + 1;
+            while (num_start < response_body.size() && 
+                   (response_body[num_start] == ' ' || response_body[num_start] == '\n')) {
+                num_start++;
+            }
+            std::string num_str;
+            while (num_start < response_body.size() && 
+                   response_body[num_start] >= '0' && response_body[num_start] <= '9') {
+                num_str += response_body[num_start++];
+            }
+            if (!num_str.empty()) {
+                result.token_count = static_cast<uint32_t>(std::stoul(num_str));
+            }
+        }
+    }
+    
+    if (found_content) {
+        result.status = VllmResult::Status::SUCCESS;
+        SYLAR_LOG_DEBUG(g_logger) << "VllmClient parsed content (first 200 chars): " 
+                                   << result.output_text.substr(0, 200)
+                                   << " tokens=" << result.token_count;
+    } else {
         // 尝试查找错误信息
-        size_t error_pos = response_body.find("\"error\":");
+        size_t error_pos = response_body.find("\"error\"");
         if (error_pos != std::string::npos) {
+            // 提取 error.message
+            size_t msg_pos = response_body.find("\"message\"", error_pos);
+            if (msg_pos != std::string::npos) {
+                size_t start = response_body.find("\"", msg_pos + 9);
+                if (start != std::string::npos) {
+                    size_t end = start + 1;
+                    while (end < response_body.size()) {
+                        if (response_body[end] == '\\') {
+                            end += 2;
+                        } else if (response_body[end] == '"') {
+                            break;
+                        } else {
+                            ++end;
+                        }
+                    }
+                    result.error_message = response_body.substr(start + 1, end - start - 1);
+                }
+            } else {
+                result.error_message = "API error in response";
+            }
             result.status = VllmResult::Status::ERROR;
-            result.error_message = "API error in response";
+            SYLAR_LOG_ERROR(g_logger) << "VllmClient API error: " << result.error_message;
         } else {
+            // 无法解析但也无错误, 标记成功但空内容
             result.status = VllmResult::Status::SUCCESS;
-            result.output_text = "";  // 空响应也算成功
+            result.output_text = "";
         }
     }
     

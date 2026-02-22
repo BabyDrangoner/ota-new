@@ -49,9 +49,16 @@ int main(int argc, char** argv) {
     config->server.bind_port = port;
     config->server.bind_address = "0.0.0.0";
     
-    // vLLM配置 (模拟模式)
+    // vLLM配置 (Qwen3-VL-4B 模型)
     config->vllm.endpoint = "http://localhost:8000";
-    config->vllm.timeout_ms = 5000;
+    config->vllm.model = "Qwen/Qwen3-VL-4B";
+    config->vllm.timeout_ms = 30000;
+    config->vllm.max_tokens = 512;
+    config->vllm.temperature = 0.7f;
+    config->vllm.top_p = 0.8f;
+    config->vllm.repetition_penalty = 1.05f;
+    config->vllm.enable_stream = false;
+    config->vllm.system_prompt = "You are a helpful assistant.";
     
     // 线程配置
     config->io_threads = 2;
