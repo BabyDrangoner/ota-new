@@ -159,6 +159,190 @@ int HttpConnection::sendRequest(HttpRequest::ptr rsp) {
     return writeFixSize(data.c_str(), data.size());
 }
 
+HttpResponse::ptr HttpConnection::recvResponseStream(const ChunkPolicy& policy,
+                                                      const ChunkCallback& cb) {
+    HttpResponseParser::ptr parser(new HttpResponseParser);
+    uint64_t buff_size = HttpRequestParser::GetHttpRequestBufferSize();
+    std::shared_ptr<char> buffer(
+            new char[buff_size + 1], [](char* ptr){ delete[] ptr; });
+    char* data = buffer.get();
+    int offset = 0;
+
+    // 第一阶段：解析响应头
+    do {
+        int len = read(data + offset, buff_size - offset);
+        if(len <= 0) { close(); return nullptr; }
+        len += offset;
+        data[len] = '\0';
+        size_t nparse = parser->execute(data, len, false);
+        if(parser->hasError()) { close(); return nullptr; }
+        offset = len - nparse;
+        if(offset == (int)buff_size) { close(); return nullptr; }
+        if(parser->isFinished()) break;
+    } while(true);
+
+    auto& client_parser = parser->getParser();
+
+    // 非 chunked：退化为普通接收，全部数据通过 cb 一次性投递
+    if(!client_parser.chunked) {
+        int64_t length = parser->getContentLength();
+        std::string body;
+        if(length > 0) {
+            body.resize(length);
+            int len = 0;
+            if(length >= offset) {
+                memcpy(&body[0], data, offset);
+                len = offset;
+            } else {
+                memcpy(&body[0], data, length);
+                len = length;
+            }
+            length -= offset;
+            if(length > 0) {
+                if(readFixSize(&body[len], length) <= 0) { close(); return nullptr; }
+            }
+        }
+        if(cb) cb(body, true);
+        return parser->getData();
+    }
+
+    // 第二阶段：chunked 流式接收，按策略分批回调
+    int    len           = offset;
+    size_t batch_chunks  = 0;   // 当前批次已处理 chunk 数
+    std::string batch_body;     // 当前批次累积数据
+
+    auto flush = [&](bool is_done) {
+        if(cb) cb(batch_body, is_done);
+        batch_body.clear();
+        batch_chunks = 0;
+    };
+
+    do {
+        // --- 内层：等待 ragel 解析出 chunk size 行 ---
+        bool begin = true;
+        do {
+            if(!begin || len == 0) {
+                int rt = read(data + len, buff_size - len);
+                if(rt <= 0) { close(); return nullptr; }
+                len += rt;
+            }
+            data[len] = '\0';
+            size_t nparse = parser->execute(data, len, true);
+            if(parser->hasError()) { close(); return nullptr; }
+            len -= nparse;
+            if(len == (int)buff_size) { close(); return nullptr; }
+            begin = false;
+        } while(!parser->isFinished());
+
+        // --- 读取 chunk 数据体 ---
+        SYLAR_LOG_DEBUG(g_logger) << "stream content_len=" << client_parser.content_len;
+
+        if(client_parser.content_len + 2 <= len) {
+            batch_body.append(data, client_parser.content_len);
+            memmove(data, data + client_parser.content_len + 2,
+                    len - client_parser.content_len - 2);
+            len -= client_parser.content_len + 2;
+        } else {
+            batch_body.append(data, len);
+            int left = client_parser.content_len - len + 2;
+            while(left > 0) {
+                int rt = read(data, left > (int)buff_size ? (int)buff_size : left);
+                if(rt <= 0) { close(); return nullptr; }
+                batch_body.append(data, rt);
+                left -= rt;
+            }
+            batch_body.resize(batch_body.size() - 2);
+            len = 0;
+        }
+        bool all_done = client_parser.chunks_done;
+
+        // 终止 chunk（content_len == 0）不计入批次，仅标记 done
+        if(client_parser.content_len > 0) {
+            ++batch_chunks;
+        }
+
+        // --- 判断是否触发回调 ---
+        bool size_limit  = (policy.max_buffer_size > 0 &&
+                            batch_body.size() >= policy.max_buffer_size);
+        bool chunk_limit = (policy.max_chunks > 0 &&
+                            batch_chunks >= policy.max_chunks);
+
+        if(all_done || size_limit || chunk_limit) {
+            flush(all_done);
+        }
+
+    } while(!client_parser.chunks_done);
+
+    // 若还有未投递的剩余数据（策略未触发但 done）
+    if(!batch_body.empty()) {
+        flush(true);
+    }
+
+    return parser->getData();
+}
+
+HttpResult::ptr HttpConnection::DoPostStream(const std::string& url
+                            , uint64_t timeout_ms
+                            , const std::map<std::string, std::string>& headers
+                            , const std::string& body
+                            , const ChunkPolicy& policy
+                            , const ChunkCallback& cb) {
+    Uri::ptr uri = Uri::Create(url);
+    if(!uri) {
+        return std::make_shared<HttpResult>((int)HttpResult::Error::INVALID_URL
+                , nullptr, "invalid url: " + url);
+    }
+    HttpRequest::ptr req = std::make_shared<HttpRequest>();
+    req->setPath(uri->getPath());
+    req->setQuery(uri->getQuery());
+    req->setFragment(uri->getFragment());
+    req->setMethod(HttpMethod::POST);
+    bool has_host = false;
+    for(auto& i : headers) {
+        if(strcasecmp(i.first.c_str(), "connection") == 0) continue;
+        if(!has_host && strcasecmp(i.first.c_str(), "host") == 0)
+            has_host = !i.second.empty();
+        req->setHeader(i.first, i.second);
+    }
+    if(!has_host) req->setHeader("Host", uri->getHost());
+    req->setBody(body);
+
+    bool is_ssl = uri->getScheme() == "https";
+    Address::ptr addr = uri->createAddress();
+    if(!addr) {
+        return std::make_shared<HttpResult>((int)HttpResult::Error::INVALID_HOST
+                , nullptr, "invalid host: " + uri->getHost());
+    }
+    Socket::ptr sock = is_ssl ? SSLSocket::CreateTCP(addr) : Socket::CreateTCP(addr);
+    if(!sock) {
+        return std::make_shared<HttpResult>((int)HttpResult::Error::CREATE_SOCKET_ERROR
+                , nullptr, "create socket fail: " + addr->toString());
+    }
+    if(!sock->connect(addr)) {
+        return std::make_shared<HttpResult>((int)HttpResult::Error::CONNECT_FAIL
+                , nullptr, "connect fail: " + addr->toString());
+    }
+    sock->setRecvTimeout(timeout_ms);
+    HttpConnection::ptr conn = std::make_shared<HttpConnection>(sock);
+    int rt = conn->sendRequest(req);
+    if(rt == 0) {
+        return std::make_shared<HttpResult>((int)HttpResult::Error::SEND_CLOSE_BY_PEER
+                , nullptr, "send request closed by peer: " + addr->toString());
+    }
+    if(rt < 0) {
+        return std::make_shared<HttpResult>((int)HttpResult::Error::SEND_SOCKET_ERROR
+                , nullptr, "send request socket error errno=" + std::to_string(errno)
+                + " errstr=" + std::string(strerror(errno)));
+    }
+    auto rsp = conn->recvResponseStream(policy, cb);
+    if(!rsp) {
+        return std::make_shared<HttpResult>((int)HttpResult::Error::TIMEOUT
+                , nullptr, "recv response timeout: " + addr->toString()
+                + " timeout_ms:" + std::to_string(timeout_ms));
+    }
+    return std::make_shared<HttpResult>((int)HttpResult::Error::OK, rsp, "ok");
+}
+
 HttpResult::ptr HttpConnection::DoGet(const std::string& url
                             , uint64_t timeout_ms
                             , const std::map<std::string, std::string>& headers

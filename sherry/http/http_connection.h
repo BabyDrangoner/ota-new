@@ -6,6 +6,7 @@
 #include "sherry/uri.h"
 #include "sherry/thread.h"
 
+#include <functional>
 #include <list>
 
 namespace sherry {
@@ -182,9 +183,55 @@ public:
     ~HttpConnection();
 
     /**
+     * @brief chunked 流式回调策略
+     * 满足以下任意条件时向应用层投递一次数据：
+     *   1. 累积 chunk 数量达到 max_chunks（0 = 不限）
+     *   2. 累积 body 字节数达到 max_buffer_size（0 = 不限）
+     *   3. 所有 chunk 接收完毕（is_done = true，始终触发）
+     */
+    struct ChunkPolicy {
+        size_t max_chunks      = 0;   ///< 每批最大 chunk 数，0 表示不限
+        size_t max_buffer_size = 0;   ///< 每批最大字节数，0 表示不限
+    };
+
+    /**
+     * @brief 流式 chunk 数据回调
+     * @param data      本批次累积的 body 内容
+     * @param is_done   是否已接收到最后一个 chunk
+     */
+    using ChunkCallback = std::function<void(const std::string& data, bool is_done)>;
+
+    /**
      * @brief 接收HTTP响应
      */
     HttpResponse::ptr recvResponse();
+
+    /**
+     * @brief 流式接收 chunked 响应，按策略分批回调给应用层
+     * @param[in] policy   触发回调的策略
+     * @param[in] cb       每批数据回调，is_done=true 表示最后一批
+     * @return 响应头部（body 已通过回调投递，response->getBody() 为空）
+     *         失败返回 nullptr
+     */
+    HttpResponse::ptr recvResponseStream(const ChunkPolicy& policy,
+                                         const ChunkCallback& cb);
+
+    /**
+     * @brief 发送HTTP的POST流式请求（建连→发送→流式回调）
+     * @param[in] url          请求URL
+     * @param[in] timeout_ms   超时（毫秒）
+     * @param[in] headers      请求头
+     * @param[in] body         请求体
+     * @param[in] policy       chunk 投递策略
+     * @param[in] cb           chunk 数据回调
+     * @return HttpResult，其中 response->getBody() 为空（数据已通过 cb 投递）
+     */
+    static HttpResult::ptr DoPostStream(const std::string& url
+                            , uint64_t timeout_ms
+                            , const std::map<std::string, std::string>& headers
+                            , const std::string& body
+                            , const ChunkPolicy& policy
+                            , const ChunkCallback& cb);
 
     /**
      * @brief 发送HTTP请求
