@@ -20,6 +20,7 @@ struct VllmConfig {
     float repetition_penalty = 1.05f;                  // 重复惩罚参数
     uint32_t timeout_ms = 30000;                       // 请求超时(毫秒)
     bool enable_stream = false;                        // 是否启用流式输出
+    uint32_t stream_batch_chunks = 1;                  // 流式模式下每次回调聚合的 chunk 数（1=逐 chunk 回调）
     uint32_t limit_mm_per_prompt = 4;                  // 每个prompt最大图片数
     
     // Qwen3-VL 图片分辨率控制

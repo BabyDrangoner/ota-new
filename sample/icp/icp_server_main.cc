@@ -32,9 +32,13 @@ void signalHandler(int signum) {
 int main(int argc, char** argv) {
     // 解析端口参数
     uint16_t port = 8000;
-    if (argc > 1) {
-        port = static_cast<uint16_t>(std::atoi(argv[1]));
-    }
+    bool enable_stream = false;
+    uint32_t stream_batch_chunks = 3;
+    if (argc > 1) port = static_cast<uint16_t>(std::atoi(argv[1]));
+    if (argc > 2) enable_stream = (std::string(argv[2]) == "1" || std::string(argv[2]) == "true");
+    if (argc > 3) stream_batch_chunks = static_cast<uint32_t>(std::atoi(argv[3]));
+
+    // 用法提示: ./icp_server [port] [enable_stream=0/1] [stream_batch_chunks=N]
 
     // 设置信号处理
     signal(SIGINT, signalHandler);
@@ -57,7 +61,8 @@ int main(int argc, char** argv) {
     config->vllm.temperature = 0.7f;
     config->vllm.top_p = 0.8f;
     config->vllm.repetition_penalty = 1.05f;
-    config->vllm.enable_stream = false;
+    config->vllm.enable_stream       = enable_stream;        // 命令行参数控制
+    config->vllm.stream_batch_chunks  = stream_batch_chunks;  // 批次大小（流式时有效）
     config->vllm.system_prompt = "You are a helpful assistant.";
     
     // 线程配置
@@ -77,6 +82,8 @@ int main(int argc, char** argv) {
                               << ":" << config->server.bind_port;
     SYLAR_LOG_INFO(g_logger) << "  - IO线程数: " << config->io_threads;
     SYLAR_LOG_INFO(g_logger) << "  - 最大连接数: " << config->server.max_connections;
+    SYLAR_LOG_INFO(g_logger) << "  - 流式推理: " << (enable_stream ? "开启" : "关闭")
+                              << (enable_stream ? (" batch_chunks=" + std::to_string(stream_batch_chunks)) : "");
 
     // 创建服务
     g_service = std::make_shared<IcpService>(config);

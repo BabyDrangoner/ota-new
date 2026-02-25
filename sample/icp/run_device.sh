@@ -9,6 +9,7 @@ BIN_DIR="$PROJECT_ROOT/bin"
 SERVER_IP=${1:-127.0.0.1}
 SERVER_PORT=${2:-9000}
 CAR_ID=${3:-1}
+IMAGE_PATH=${4:-file/ota_1_1.0.01_gps.jpg}
 
 echo "========================================"
 echo "        启动设备客户端"
@@ -17,6 +18,7 @@ echo "项目根目录: $PROJECT_ROOT"
 echo "可执行文件: $BIN_DIR/device_client"
 echo "服务器: $SERVER_IP:$SERVER_PORT"
 echo "车辆ID: $CAR_ID"
+echo "图片路径: $IMAGE_PATH"
 echo "----------------------------------------"
 
 # 检查可执行文件
@@ -28,4 +30,4 @@ if [ ! -f "$BIN_DIR/device_client" ]; then
 fi
 
 # 运行客户端
-exec "$BIN_DIR/device_client" $SERVER_IP $SERVER_PORT $CAR_ID
+exec "$BIN_DIR/device_client" $SERVER_IP $SERVER_PORT $CAR_ID $IMAGE_PATH

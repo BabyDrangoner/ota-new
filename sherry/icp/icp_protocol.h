@@ -222,9 +222,12 @@ public:
 struct OutputMessage {
     uint32_t car_id;
     uint64_t seq;
-    std::string status;       // "success", "error", "timeout"
-    uint64_t latency_ms;      // 处理延迟
-    std::string waypoints;    // JSON格式的waypoints
+    std::string type;                   // "complete" | "stream_token" | "stream_batch"
+    std::string status;                 // complete 类型时: "success", "error"
+    uint64_t latency_ms;
+    std::string waypoints;              // complete 时完整文本
+    std::string token;                  // stream_token 单个token
+    std::vector<std::string> tokens;    // stream_batch 批次tokens
     
     std::string toJson() const;
     static OutputMessage fromJson(const std::string& json);

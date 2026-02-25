@@ -12,10 +12,17 @@ namespace icp {
 
 std::string OutputMessage::toJson() const {
     nlohmann::json j;
-    j["car_id"] = car_id;
-    j["seq"] = seq;
-    j["status"] = status;
-    j["latency_ms"] = latency_ms;
+    j["car_id"]    = car_id;
+    j["seq"]       = seq;
+    j["type"]      = type.empty() ? "complete" : type;
+    j["status"]    = status;
+    j["latency_ms"]= latency_ms;
+    if (!token.empty()) {
+        j["token"] = token;
+    }
+    if (!tokens.empty()) {
+        j["tokens"] = tokens;   // nlohmann 直接序列化 vector<string>
+    }
     if (!waypoints.empty()) {
         // 尝试解析 waypoints 为 JSON 对象
         try {
@@ -38,11 +45,20 @@ OutputMessage OutputMessage::fromJson(const std::string& json) {
         if (j.contains("seq")) {
             msg.seq = j["seq"].get<uint64_t>();
         }
+        if (j.contains("type")) {
+            msg.type = j["type"].get<std::string>();
+        }
         if (j.contains("status")) {
             msg.status = j["status"].get<std::string>();
         }
         if (j.contains("latency_ms")) {
             msg.latency_ms = j["latency_ms"].get<uint64_t>();
+        }
+        if (j.contains("token")) {
+            msg.token = j["token"].get<std::string>();
+        }
+        if (j.contains("tokens") && j["tokens"].is_array()) {
+            msg.tokens = j["tokens"].get<std::vector<std::string>>();
         }
         if (j.contains("waypoints")) {
             if (j["waypoints"].is_string()) {

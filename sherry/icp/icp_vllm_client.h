@@ -74,10 +74,19 @@ public:
                                uint64_t time_ms) {}
     
     /**
-     * @brief 流式token回调
+     * @brief 流式token回调（单个）
      */
     virtual void onStreamToken(const std::string& request_id,
                                 const std::string& token) {}
+
+    /**
+     * @brief 流式批次回调：一次 HTTP chunk 解析出的所有 token
+     * 默认实现逐个转发 onStreamToken，子类可覆盖实现整批处理
+     */
+    virtual void onStreamBatch(const std::string& request_id,
+                                const std::vector<std::string>& tokens) {
+        for (auto& t : tokens) onStreamToken(request_id, t);
+    }
 };
 
 /**
@@ -150,17 +159,31 @@ private:
      * @brief 执行HTTP请求(在IO线程中执行)
      */
     void doHttpRequest(VllmRequest::ptr request);
-    
+
+    /**
+     * @brief 流式模式 HTTP 请求，每收到一批 chunk 就解析 token 并回调
+     */
+    void doHttpRequestStream(VllmRequest::ptr request);
+
+    /**
+     * @brief 从一批 SSE 数据中提取 token 列表
+     * @param chunk_data  recvResponseStream 的单次回调数据
+     * @param out_tokens  输出：解析出的 token 列表
+     * @return 是否遭遇 [DONE]
+     */
+    bool parseTokensFromBatch(const std::string& chunk_data,
+                               std::vector<std::string>& out_tokens);
+
     /**
      * @brief 执行HTTP abort请求
      */
     void doHttpAbort(const std::string& request_id);
     
     /**
-     * @brief 解析流式响应
+     * @brief 解析流式响应 (SSE), 同时触发 onStreamToken 回调
      */
-    void parseStreamResponse(const std::string& request_id,
-                              const std::string& chunk);
+    VllmResult parseStreamResponse(const std::string& request_id,
+                                    const std::string& body);
     
     /**
      * @brief 解析非流式响应  

@@ -190,6 +190,7 @@ add_sherry_executable(test_icp)
 add_sherry_executable(test_icp_server)
 add_sherry_executable(test_icp_client)
 add_sherry_executable(test_vllm_image)
+add_sherry_executable(test_vllm_stream)
 
 # Device-ICP 联调测试
 add_sherry_executable(test_device_icp_integration)

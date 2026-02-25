@@ -16,6 +16,8 @@
 #include <csignal>
 #include <atomic>
 #include <chrono>
+#include <fstream>
+#include <unistd.h>
 
 using namespace sherry;
 using namespace sherry::device;
@@ -37,10 +39,12 @@ int main(int argc, char** argv) {
     std::string server_ip = "127.0.0.1";
     uint16_t server_port = 8000;
     uint64_t car_id = 1;
+    std::string image_path = "file/ota_1_1.0.01_gps.jpg";  // 默认使用 file/ 目录下的图片
 
     if (argc > 1) server_ip = argv[1];
     if (argc > 2) server_port = static_cast<uint16_t>(std::atoi(argv[2]));
     if (argc > 3) car_id = static_cast<uint64_t>(std::atoll(argv[3]));
+    if (argc > 4) image_path = argv[4];
 
     // 设置信号处理
     signal(SIGINT, signalHandler);
@@ -52,13 +56,24 @@ int main(int argc, char** argv) {
     SYLAR_LOG_INFO(g_logger) << "配置:";
     SYLAR_LOG_INFO(g_logger) << "  - 服务器地址: " << server_ip << ":" << server_port;
     SYLAR_LOG_INFO(g_logger) << "  - 车辆ID: " << car_id;
+    SYLAR_LOG_INFO(g_logger) << "  - 图片路径: " << image_path;
 
     // 创建 IOManager
     auto io_mgr = std::make_shared<IOManager>(2, true, "device");
 
-    // 创建模拟相机 (1张RGB + 1张深度图)
-    auto camera = std::make_shared<SingleCamera>(1, 1);
-    SYLAR_LOG_INFO(g_logger) << "  - 相机: 1 RGB + 1 DEPTH";
+    // 创建相机，加载 file/ 目录下的图片作为 RGB 输入 (无 DEPTH)
+    {
+        std::ifstream probe(image_path, std::ios::binary);
+        if (!probe.is_open()) {
+            char cwd_buf[4096] = {};
+            getcwd(cwd_buf, sizeof(cwd_buf));
+            SYLAR_LOG_ERROR(g_logger) << "图片文件不存在或无法打开: " << image_path
+                                       << "  (当前工作目录: " << cwd_buf << ")";
+            return 1;
+        }
+    }
+    auto camera = std::make_shared<SingleCamera>(1, 0, image_path);
+    SYLAR_LOG_INFO(g_logger) << "  - 相机: 1 RGB (来自文件), 0 DEPTH";
     SYLAR_LOG_INFO(g_logger) << "  - 图像缓冲区大小: " << camera->get_buf_len() << " bytes";
 
     // 配置设备引擎
@@ -84,14 +99,37 @@ int main(int argc, char** argv) {
     // 设置 ICP 结果回调
     g_device->setIcpResultCallback([&](const icp::OutputMessage& msg) {
         ++result_received;
-        SYLAR_LOG_INFO(g_logger) << "[ICP Result] "
-                                  << "car_id=" << msg.car_id
-                                  << " seq=" << msg.seq
-                                  << " status=" << msg.status
-                                  << " latency=" << msg.latency_ms << "ms";
-        
-        if (!msg.waypoints.empty()) {
-            SYLAR_LOG_INFO(g_logger) << "  路径点(JSON): " << msg.waypoints;
+
+        const std::string& type = msg.type;
+
+        if (type == "stream_batch") {
+            // 流式批次帧：包含本批次所有 token
+            SYLAR_LOG_INFO(g_logger) << "[ICP Stream] "
+                                      << "car_id=" << msg.car_id
+                                      << " seq=" << msg.seq
+                                      << " tokens(" << msg.tokens.size() << "):";
+            std::string batch_text;
+            for (auto& tok : msg.tokens) {
+                batch_text += tok;
+            }
+            SYLAR_LOG_INFO(g_logger) << "  batch_text=[" << batch_text << "]";
+
+        } else if (type == "stream_token") {
+            // 单 token 帧（兼容旧格式）
+            SYLAR_LOG_INFO(g_logger) << "[ICP Token] "
+                                      << "car_id=" << msg.car_id
+                                      << " token=[" << msg.token << "]";
+
+        } else {
+            // complete 帧（包括 type=="" 的旧格式兜底）
+            SYLAR_LOG_INFO(g_logger) << "[ICP Complete] "
+                                      << "car_id=" << msg.car_id
+                                      << " seq=" << msg.seq
+                                      << " status=" << msg.status
+                                      << " latency=" << msg.latency_ms << "ms";
+            if (!msg.waypoints.empty()) {
+                SYLAR_LOG_INFO(g_logger) << "  output_text: " << msg.waypoints;
+            }
         }
     });
 
