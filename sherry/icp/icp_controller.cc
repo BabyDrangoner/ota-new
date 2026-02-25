@@ -251,6 +251,34 @@ void IcpController::onFirstToken(const std::string& request_id, uint64_t time_ms
     }
 }
 
+void IcpController::onStreamBatch(const std::string& request_id,
+                                   const std::vector<std::string>& tokens) {
+    if (tokens.empty()) return;
+
+    // 查找请求对应的 car_id
+    RequestInfo info;
+    if (!m_carStates->findRequest(request_id, info)) {
+        return;  // 请求已被 abort 或过期
+    }
+
+    // 检查请求是否仍是当前请求（Latest-Only）
+    CarState* state = m_carStates->getState(info.car_id);
+    if (!state || !state->isCurrentRequest(request_id)) {
+        return;
+    }
+
+    OutputMessage output;
+    output.car_id  = info.car_id;
+    output.seq     = info.seq;
+    output.type    = "stream_batch";
+    output.tokens  = tokens;
+
+    Mutex::Lock lock(m_callbackMutex);
+    if (m_resultCallback) {
+        m_resultCallback(info.car_id, output);
+    }
+}
+
 void IcpController::handleResult(const VllmResult& result) {
     // 查找请求信息
     RequestInfo info;
@@ -287,9 +315,10 @@ void IcpController::handleResult(const VllmResult& result) {
         
         // 构建输出消息
         OutputMessage output;
-        output.car_id = info.car_id;
-        output.seq = info.seq;
-        output.status = "success";
+        output.car_id    = info.car_id;
+        output.seq       = info.seq;
+        output.type      = "complete";
+        output.status    = "success";
         output.latency_ms = e2e_latency;
         output.waypoints = parseWaypoints(result.output_text);
         

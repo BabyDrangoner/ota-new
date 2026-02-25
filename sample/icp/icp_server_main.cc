@@ -31,14 +31,14 @@ void signalHandler(int signum) {
 
 int main(int argc, char** argv) {
     // 解析端口参数
-    uint16_t port = 8000;
-    bool enable_stream = false;
+    uint16_t port = 9000;          // 默认 9000，避免与 vLLM(8000) 端口冲突
+    bool enable_stream = true;     // 默认开启流式
     uint32_t stream_batch_chunks = 3;
     if (argc > 1) port = static_cast<uint16_t>(std::atoi(argv[1]));
     if (argc > 2) enable_stream = (std::string(argv[2]) == "1" || std::string(argv[2]) == "true");
     if (argc > 3) stream_batch_chunks = static_cast<uint32_t>(std::atoi(argv[3]));
 
-    // 用法提示: ./icp_server [port] [enable_stream=0/1] [stream_batch_chunks=N]
+    // 用法: ./icp_server [port=9000] [enable_stream=1] [stream_batch_chunks=3]
 
     // 设置信号处理
     signal(SIGINT, signalHandler);

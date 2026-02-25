@@ -458,21 +458,20 @@ bool IcpService::start() {
 }
 
 void IcpService::stop() {
-    if (!m_running.load(std::memory_order_acquire)) {
-        return;
+    bool was_running = m_running.exchange(false, std::memory_order_acq_rel);
+
+    if (was_running) {
+        // 先停 server/controller，拒绝新请求
+        if (m_server) {
+            m_server->stop();
+        }
+        if (m_controller) {
+            m_controller->stop();
+        }
     }
-    
-    m_running.store(false, std::memory_order_release);
-    
-    if (m_server) {
-        m_server->stop();
-    }
-    
-    if (m_controller) {
-        m_controller->stop();
-    }
-    
-    // 停止IOManager
+
+    // 无论是否曾经 running，都要停止 IOManager 以排空残留任务，
+    // 防止析构时 server/controller 已销毁但任务仍在执行（bad_weak_ptr）
     if (m_ioManager) {
         m_ioManager->stop();
     }
@@ -482,8 +481,10 @@ void IcpService::stop() {
     if (m_httpManager) {
         m_httpManager->stop();
     }
-    
-    SYLAR_LOG_INFO(g_logger) << "IcpService stopped";
+
+    if (was_running) {
+        SYLAR_LOG_INFO(g_logger) << "IcpService stopped";
+    }
 }
 
 IcpMetrics::ptr IcpService::getMetrics() {

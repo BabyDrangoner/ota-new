@@ -94,6 +94,8 @@ public:
     // VllmCallback 接口实现
     void onComplete(const VllmResult& result) override;
     void onFirstToken(const std::string& request_id, uint64_t time_ms) override;
+    void onStreamBatch(const std::string& request_id,
+                       const std::vector<std::string>& tokens) override;
     
 private:
     /**
