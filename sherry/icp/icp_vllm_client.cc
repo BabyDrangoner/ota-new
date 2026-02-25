@@ -49,6 +49,33 @@ std::string base64Encode(const uint8_t* data, size_t size) {
     return result;
 }
 
+static std::string jsonEscape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 16);
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            case '\b': out += "\\b";  break;
+            case '\f': out += "\\f";  break;
+            default:
+                if (c < 0x20) {
+                    // 控制字符: \uXXXX
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out += static_cast<char>(c);
+                }
+                break;
+        }
+    }
+    return out;
+}
+
 std::vector<std::string> encodeImagesToBase64(const std::vector<ImageView>& images) {
     std::vector<std::string> result;
     result.reserve(images.size());
@@ -166,7 +193,7 @@ std::string VllmClient::buildRequestBody(const VllmRequest& request) {
     if (!m_config.system_prompt.empty()) {
         oss << "    {\n";
         oss << "      \"role\": \"system\",\n";
-        oss << "      \"content\": \"" << m_config.system_prompt << "\"\n";
+        oss << "      \"content\": \"" << jsonEscape(m_config.system_prompt) << "\"\n";
         oss << "    },\n";
     }
     
@@ -180,6 +207,7 @@ std::string VllmClient::buildRequestBody(const VllmRequest& request) {
         oss << "        {\n";
         oss << "          \"type\": \"image_url\",\n";
         oss << "          \"image_url\": {\n";
+        // base64 字符集本身不含需转义的字符, 无需 jsonEscape
         oss << "            \"url\": \"data:image/jpeg;base64," 
             << request.images_base64[i] << "\",\n";
         oss << "            \"min_pixels\": " << m_config.min_pixels << ",\n";
@@ -196,7 +224,7 @@ std::string VllmClient::buildRequestBody(const VllmRequest& request) {
     if (!request.prompt.empty()) {
         oss << "        {\n";
         oss << "          \"type\": \"text\",\n";
-        oss << "          \"text\": \"" << request.prompt << "\"\n";
+        oss << "          \"text\": \"" << jsonEscape(request.prompt) << "\"\n";
         oss << "        }\n";
     }
     
@@ -222,6 +250,9 @@ void VllmClient::doHttpRequest(VllmRequest::ptr request) {
     
     // 构建请求体
     std::string body = buildRequestBody(*request);
+    
+    SYLAR_LOG_DEBUG(g_logger) << "VllmClient request body (first 1000 chars): "
+                               << body.substr(0, 1000);
     
     // 构建URL
     std::string url = m_config.endpoint + "/v1/chat/completions";
@@ -274,9 +305,13 @@ void VllmClient::doHttpRequest(VllmRequest::ptr request) {
         vllm_result.error_message = "HTTP " + 
             std::to_string(static_cast<int>(result->response->getStatus()));
         
+        // 打印响应体辅助排查 400/422 等错误
+        const std::string& resp_body = result->response->getBody();
         SYLAR_LOG_ERROR(g_logger) << "VllmClient HTTP error: " 
                                    << vllm_result.error_message
-                                   << " request_id=" << request->request_id;
+                                   << " request_id=" << request->request_id
+                                   << " response_body=" 
+                                   << resp_body.substr(0, 512);
         
         if (m_metrics) {
             m_metrics->getSystemMetrics().http_errors.fetch_add(1, 
