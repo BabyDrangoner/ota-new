@@ -509,7 +509,8 @@ HttpConnection::ptr HttpConnectionPool::getConnection() {
             invalid_conns.push_back(conn);
             continue;
         }
-        if((conn->m_createTime + m_maxAliveTime) > now_ms) {
+        if((conn->m_createTime + m_maxAliveTime) < now_ms) {
+            // 连接已超过最大存活时间，丢弃
             invalid_conns.push_back(conn);
             continue;
         }
@@ -549,8 +550,9 @@ HttpConnection::ptr HttpConnectionPool::getConnection() {
 void HttpConnectionPool::ReleasePtr(HttpConnection* ptr, HttpConnectionPool* pool) {
     ++ptr->m_request;
     if(!ptr->isConnected()
-            || ((ptr->m_createTime + pool->m_maxAliveTime) >= sherry::GetCurrentMS())
+            || ((ptr->m_createTime + pool->m_maxAliveTime) <= sherry::GetCurrentMS())
             || (ptr->m_request >= pool->m_maxRequest)) {
+        // 断开 / 已过期 / 请求次数超限 → 销毁
         delete ptr;
         --pool->m_total;
         return;

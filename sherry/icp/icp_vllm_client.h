@@ -13,6 +13,7 @@
 #include "icp_metrics.h"
 #include "sherry/thread.h"
 #include "sherry/iomanager.h"
+#include "sherry/http/http_connection.h"
 
 namespace sherry {
 namespace icp {
@@ -216,6 +217,10 @@ private:
     std::unordered_set<std::string> m_abortedRequests;
     
     std::atomic<bool> m_running{false};
+
+    // HTTP 连接池（支持 keep-alive 复用）
+    http::HttpConnectionPool::ptr m_pool;
+    std::string m_vllmHost;   // Host header 值，解析自 endpoint
 };
 
 /**

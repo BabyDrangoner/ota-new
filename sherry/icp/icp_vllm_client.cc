@@ -112,10 +112,31 @@ bool VllmClient::init(IOManager* io_manager) {
     
     m_ioManager = io_manager;
     m_running.store(true, std::memory_order_release);
-    
+
+    // 创建 HTTP 连接池，避免每次推理都新建 TCP 连接
+    m_pool = http::HttpConnectionPool::Create(
+        m_config.endpoint,
+        "",
+        m_config.max_connections,  // 最大连接数
+        5 * 60 * 1000,             // 最大存活时间：5 分钟
+        100000                     // 每条连接最大请求数
+    );
+
+    // 缓存 Host header（含端口，如 localhost:8000）
+    sherry::Uri::ptr uri = sherry::Uri::Create(m_config.endpoint);
+    if (uri) {
+        m_vllmHost = uri->getHost();
+        uint16_t port = uri->getPort();
+        bool is_https = uri->getScheme() == "https";
+        if (port && port != (is_https ? 443 : 80)) {
+            m_vllmHost += ":" + std::to_string(port);
+        }
+    }
+
     SYLAR_LOG_INFO(g_logger) << "VllmClient initialized with endpoint: " 
                               << m_config.endpoint
-                              << " model: " << m_config.model;
+                              << " model: " << m_config.model
+                              << " pool_size: " << m_config.max_connections;
     return true;
 }
 
@@ -260,23 +281,19 @@ void VllmClient::doHttpRequest(VllmRequest::ptr request) {
     SYLAR_LOG_DEBUG(g_logger) << "VllmClient request body (first 1000 chars): "
                                << body.substr(0, 1000);
     
-    // 构建URL
-    std::string url = m_config.endpoint + "/v1/chat/completions";
-    
     // 设置请求头
     std::map<std::string, std::string> headers;
     headers["Content-Type"] = "application/json";
-    headers["Accept"] = m_config.enable_stream ? 
-        "text/event-stream" : "application/json";
-    
-    // 发送请求
+    headers["Accept"] = "application/json";
+
+    // 发送请求（通过连接池，支持 keep-alive 复用）
     if (m_metrics) {
         m_metrics->getSystemMetrics().http_requests.fetch_add(1, 
             std::memory_order_relaxed);
     }
-    
-    auto result = http::HttpConnection::DoPost(url, m_config.timeout_ms, 
-                                                headers, body);
+
+    auto result = m_pool->doPost("/v1/chat/completions",
+                                  m_config.timeout_ms, headers, body);
     
     // 检查是否已被abort
     {
@@ -537,11 +554,6 @@ void VllmClient::doHttpRequestStream(VllmRequest::ptr request) {
     }
 
     std::string body = buildRequestBody(*request);
-    std::string url  = m_config.endpoint + "/v1/chat/completions";
-
-    std::map<std::string, std::string> headers;
-    headers["Content-Type"] = "application/json";
-    headers["Accept"]       = "text/event-stream";
 
     if (m_metrics) {
         m_metrics->getSystemMetrics().http_requests.fetch_add(1,
@@ -609,8 +621,39 @@ void VllmClient::doHttpRequestStream(VllmRequest::ptr request) {
         if (is_done) stream_done = true;
     };
 
-    auto result = http::HttpConnection::DoPostStream(
-        url, m_config.timeout_ms, headers, body, policy, chunk_cb);
+    // 从连接池获取连接，避免每次推理都新建 TCP 握手
+    http::HttpResult::ptr result;
+    auto conn = m_pool->getConnection();
+    if (!conn) {
+        result = std::make_shared<http::HttpResult>(
+            (int)http::HttpResult::Error::POOL_GET_CONNECTION,
+            nullptr, "get connection from pool failed: " + m_config.endpoint);
+    } else {
+        conn->getSocket()->setRecvTimeout(m_config.timeout_ms);
+
+        http::HttpRequest::ptr req = std::make_shared<http::HttpRequest>();
+        req->setPath("/v1/chat/completions");
+        req->setMethod(http::HttpMethod::POST);
+        req->setClose(false);  // keep-alive：请求结束后连接归还池
+        req->setHeader("Host",         m_vllmHost);
+        req->setHeader("Content-Type", "application/json");
+        req->setHeader("Accept",       "text/event-stream");
+        req->setBody(body);
+
+        int rt = conn->sendRequest(req);
+        if (rt <= 0) {
+            result = std::make_shared<http::HttpResult>(
+                (int)http::HttpResult::Error::SEND_SOCKET_ERROR,
+                nullptr, "send request failed");
+        } else {
+            auto rsp = conn->recvResponseStream(policy, chunk_cb);
+            result = rsp
+                ? std::make_shared<http::HttpResult>((int)http::HttpResult::Error::OK, rsp, "ok")
+                : std::make_shared<http::HttpResult>((int)http::HttpResult::Error::TIMEOUT,
+                                                     nullptr, "recv stream timeout: " + m_config.endpoint);
+        }
+        // conn 析构时自动归还连接池（若 socket 仍活着）
+    }
 
     // 检查 abort
     {
