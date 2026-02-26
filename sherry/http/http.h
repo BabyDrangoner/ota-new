@@ -308,6 +308,12 @@ public:
         return getAs(m_headers, key, def);
     }
 
+    /**
+     * @brief 从响应头的 Connection 字段同步 m_close
+     *        HTTP/1.1 未显式声明 Connection 时默认 keep-alive
+     */
+    void init();
+
     std::ostream& dump(std::ostream& os) const;
     std::string toString() const;
 

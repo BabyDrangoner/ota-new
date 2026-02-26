@@ -193,6 +193,21 @@ std::string HttpRequest::toString() const{
     return ss.str();
 }
 
+void HttpResponse::init() {
+    std::string conn = getHeader("connection");
+    if (!conn.empty()) {
+        if (strcasecmp(conn.c_str(), "keep-alive") == 0) {
+            m_close = false;
+        } else {
+            m_close = true;
+        }
+    } else {
+        // HTTP/1.1 未显式指定 Connection 时默认 keep-alive
+        // HTTP/1.0 默认 close
+        m_close = (m_version != 0x11);
+    }
+}
+
 HttpResponse::HttpResponse(uint8_t version, bool close)
     :m_status(HttpStatus::OK)
     ,m_version(version)

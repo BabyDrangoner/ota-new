@@ -148,6 +148,8 @@ HttpResponse::ptr HttpConnection::recvResponse() {
         }
         parser->getData()->setBody(body);
     }
+    // 从响应头的 Connection 字段同步 m_close
+    parser->getData()->init();
     return parser->getData();
 }
 
@@ -278,6 +280,8 @@ HttpResponse::ptr HttpConnection::recvResponseStream(const ChunkPolicy& policy,
         flush(true);
     }
 
+    // 从响应头的 Connection 字段同步 m_close
+    parser->getData()->init();
     return parser->getData();
 }
 
@@ -501,20 +505,25 @@ HttpConnection::ptr HttpConnectionPool::getConnection() {
     uint64_t now_ms = sherry::GetCurrentMS();
     std::vector<HttpConnection*> invalid_conns;
     HttpConnection* ptr = nullptr;
+    bool reused = false;
     MutexType::Lock lock(m_mutex);
     while(!m_conns.empty()) {
         auto conn = *m_conns.begin();
         m_conns.pop_front();
         if(!conn->isConnected()) {
+            SYLAR_LOG_DEBUG(g_logger) << "[pool] discard disconnected conn, pool_size=" << m_conns.size();
             invalid_conns.push_back(conn);
             continue;
         }
         if((conn->m_createTime + m_maxAliveTime) < now_ms) {
             // 连接已超过最大存活时间，丢弃
+            SYLAR_LOG_DEBUG(g_logger) << "[pool] discard expired conn age="
+                << (now_ms - conn->m_createTime) << "ms, pool_size=" << m_conns.size();
             invalid_conns.push_back(conn);
             continue;
         }
         ptr = conn;
+        reused = true;
         break;
     }
     lock.unlock();
@@ -542,6 +551,11 @@ HttpConnection::ptr HttpConnectionPool::getConnection() {
 
         ptr = new HttpConnection(sock);
         ++m_total;
+        SYLAR_LOG_DEBUG(g_logger) << "[pool] NEW conn total=" << m_total
+            << " host=" << m_host << ":" << m_port;
+    } else {
+        SYLAR_LOG_DEBUG(g_logger) << "[pool] REUSE conn requests=" << ptr->m_request
+            << " age=" << (now_ms - ptr->m_createTime) << "ms total=" << m_total;
     }
     return HttpConnection::ptr(ptr, std::bind(&HttpConnectionPool::ReleasePtr
                                , std::placeholders::_1, this));
@@ -549,9 +563,16 @@ HttpConnection::ptr HttpConnectionPool::getConnection() {
 
 void HttpConnectionPool::ReleasePtr(HttpConnection* ptr, HttpConnectionPool* pool) {
     ++ptr->m_request;
-    if(!ptr->isConnected()
-            || ((ptr->m_createTime + pool->m_maxAliveTime) <= sherry::GetCurrentMS())
-            || (ptr->m_request >= pool->m_maxRequest)) {
+    bool connected  = ptr->isConnected();
+    bool expired    = (ptr->m_createTime + pool->m_maxAliveTime) <= sherry::GetCurrentMS();
+    bool req_limit  = (ptr->m_request >= pool->m_maxRequest);
+    SYLAR_LOG_DEBUG(g_logger) << "[pool] ReleasePtr: connected=" << connected
+        << " expired=" << expired
+        << " req_limit=" << req_limit
+        << " requests=" << ptr->m_request
+        << "/" << pool->m_maxRequest
+        << " age=" << (sherry::GetCurrentMS() - ptr->m_createTime) << "ms";
+    if(!connected || expired || req_limit) {
         // 断开 / 已过期 / 请求次数超限 → 销毁
         delete ptr;
         --pool->m_total;
@@ -559,6 +580,7 @@ void HttpConnectionPool::ReleasePtr(HttpConnection* ptr, HttpConnectionPool* poo
     }
     MutexType::Lock lock(pool->m_mutex);
     pool->m_conns.push_back(ptr);
+    SYLAR_LOG_DEBUG(g_logger) << "[pool] conn returned to pool, pool_size=" << pool->m_conns.size();
 }
 
 HttpResult::ptr HttpConnectionPool::doGet(const std::string& url

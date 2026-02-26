@@ -648,12 +648,22 @@ void VllmClient::doHttpRequestStream(VllmRequest::ptr request) {
                 nullptr, "send request failed");
         } else {
             auto rsp = conn->recvResponseStream(policy, chunk_cb);
-            result = rsp
-                ? std::make_shared<http::HttpResult>((int)http::HttpResult::Error::OK, rsp, "ok")
-                : std::make_shared<http::HttpResult>((int)http::HttpResult::Error::TIMEOUT,
-                                                     nullptr, "recv stream timeout: " + m_config.endpoint);
+            if (rsp) {
+                // 若服务端响应 Connection: close，主动关闭连接使其不归还连接池
+                // 避免下次取出后 sendRequest 因半关闭而失败、再新建连接
+                if (rsp->isClose()) {
+                    SYLAR_LOG_DEBUG(g_logger) << "[vllm] stream rsp Connection:close, dropping conn";
+                    conn->close();
+                }
+                result = std::make_shared<http::HttpResult>(
+                    (int)http::HttpResult::Error::OK, rsp, "ok");
+            } else {
+                result = std::make_shared<http::HttpResult>(
+                    (int)http::HttpResult::Error::TIMEOUT,
+                    nullptr, "recv stream timeout: " + m_config.endpoint);
+            }
         }
-        // conn 析构时自动归还连接池（若 socket 仍活着）
+        // conn 析构时自动归还连接池（若 socket 仍活着且服务端未要求 close）
     }
 
     // 检查 abort
