@@ -96,44 +96,56 @@ int main(int argc, char** argv) {
     std::atomic<uint64_t> msg_sent{0};
     std::atomic<uint64_t> result_received{0};
 
+    // 跟踪当前流式请求
+    uint64_t stream_seq = 0;
+    bool     stream_open = false;  // 是否正在打印某个请求的 token 流
+
     // 设置 ICP 结果回调
     g_device->setIcpResultCallback([&](const icp::OutputMessage& msg) {
         ++result_received;
-
         const std::string& type = msg.type;
 
-        if (type == "stream_batch") {
-            // 流式批次帧：包含本批次所有 token
-            SYLAR_LOG_INFO(g_logger) << "[ICP Stream] "
-                                      << "car_id=" << msg.car_id
-                                      << " seq=" << msg.seq
-                                      << " tokens(" << msg.tokens.size() << "):";
-            std::string batch_text;
-            for (auto& tok : msg.tokens) {
-                batch_text += tok;
+        if (type == "stream_batch" || type == "stream_token") {
+            // 新请求：打印请求头
+            if (!stream_open || stream_seq != msg.seq) {
+                if (stream_open) {
+                    // 上一个请求未收到 complete，先换行
+                    std::cout << "\n";
+                }
+                std::cout << "\n>>> [car=" << msg.car_id
+                          << " seq=" << msg.seq << "]\n";
+                stream_seq  = msg.seq;
+                stream_open = true;
             }
-            SYLAR_LOG_INFO(g_logger) << "  batch_text=[" << batch_text << "]";
 
-        } else if (type == "stream_token") {
-            // 单 token 帧（兼容旧格式）
-            SYLAR_LOG_INFO(g_logger) << "[ICP Token] "
-                                      << "car_id=" << msg.car_id
-                                      << " token=[" << msg.token << "]";
+            // 内联打印 token
+            if (type == "stream_batch") {
+                for (auto& tok : msg.tokens) {
+                    std::cout << tok;
+                }
+            } else {
+                std::cout << msg.token;
+            }
+            std::cout.flush();
 
         } else {
-            // complete 帧（包括 type=="" 的旧格式兜底）
-            SYLAR_LOG_INFO(g_logger) << "[ICP Complete] "
-                                      << "car_id=" << msg.car_id
-                                      << " seq=" << msg.seq
-                                      << " status=" << msg.status
-                                      << " latency=" << msg.latency_ms << "ms";
-            if (!msg.waypoints.empty()) {
-                SYLAR_LOG_INFO(g_logger) << "  output_text: " << msg.waypoints;
+            // complete 帧
+            if (stream_open && stream_seq == msg.seq) {
+                // 结束当前 token 流行
+                std::cout << "\n";
+                stream_open = false;
             }
+
+            std::string result_line = msg.status == "success" ? "OK" : ("ERR:" + msg.status);
+            std::cout << "<<< [car=" << msg.car_id
+                      << " seq=" << msg.seq << "] "
+                      << result_line
+                      << "  latency=" << msg.latency_ms << "ms\n";
+            std::cout.flush();
         }
     });
 
-    // 设置服务器消息回调
+    // 设置服务器消息回调（仅 debug 级别，默认不可见）
     g_device->setServerMessageCallback([](const std::string& msg) {
         SYLAR_LOG_DEBUG(g_logger) << "[Server Raw] " << msg;
     });
