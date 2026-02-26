@@ -505,7 +505,6 @@ HttpConnection::ptr HttpConnectionPool::getConnection() {
     uint64_t now_ms = sherry::GetCurrentMS();
     std::vector<HttpConnection*> invalid_conns;
     HttpConnection* ptr = nullptr;
-    bool reused = false;
     MutexType::Lock lock(m_mutex);
     while(!m_conns.empty()) {
         auto conn = *m_conns.begin();
@@ -523,7 +522,6 @@ HttpConnection::ptr HttpConnectionPool::getConnection() {
             continue;
         }
         ptr = conn;
-        reused = true;
         break;
     }
     lock.unlock();
