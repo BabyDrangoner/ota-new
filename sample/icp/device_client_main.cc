@@ -27,7 +27,7 @@ static std::atomic<bool> g_running{true};
 static DeviceEngine::ptr g_device;
 
 void signalHandler(int signum) {
-    SYLAR_LOG_INFO(g_logger) << "收到信号 " << signum << ", 正在停止设备...";
+    std::cout << "\n收到信号 " << signum << ", 正在停止设备...\n";
     g_running = false;
     if (g_device) {
         g_device->stop();
@@ -50,13 +50,13 @@ int main(int argc, char** argv) {
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 
-    SYLAR_LOG_INFO(g_logger) << "========================================";
-    SYLAR_LOG_INFO(g_logger) << "       设备客户端启动程序";
-    SYLAR_LOG_INFO(g_logger) << "========================================";
-    SYLAR_LOG_INFO(g_logger) << "配置:";
-    SYLAR_LOG_INFO(g_logger) << "  - 服务器地址: " << server_ip << ":" << server_port;
-    SYLAR_LOG_INFO(g_logger) << "  - 车辆ID: " << car_id;
-    SYLAR_LOG_INFO(g_logger) << "  - 图片路径: " << image_path;
+    std::cout << "========================================\n"
+              << "       设备客户端启动程序\n"
+              << "========================================\n"
+              << "配置:\n"
+              << "  - 服务器地址: " << server_ip << ":" << server_port << "\n"
+              << "  - 车辆ID: " << car_id << "\n"
+              << "  - 图片路径: " << image_path << "\n";
 
     // 创建 IOManager
     auto io_mgr = std::make_shared<IOManager>(2, true, "device");
@@ -67,14 +67,14 @@ int main(int argc, char** argv) {
         if (!probe.is_open()) {
             char cwd_buf[4096] = {};
             getcwd(cwd_buf, sizeof(cwd_buf));
-            SYLAR_LOG_ERROR(g_logger) << "图片文件不存在或无法打开: " << image_path
-                                       << "  (当前工作目录: " << cwd_buf << ")";
+            std::cerr << "[ERROR] 图片文件不存在或无法打开: " << image_path
+                      << "  (当前工作目录: " << cwd_buf << ")\n";
             return 1;
         }
     }
     auto camera = std::make_shared<SingleCamera>(1, 0, image_path);
-    SYLAR_LOG_INFO(g_logger) << "  - 相机: 1 RGB (来自文件), 0 DEPTH";
-    SYLAR_LOG_INFO(g_logger) << "  - 图像缓冲区大小: " << camera->get_buf_len() << " bytes";
+    std::cout << "  - 相机: 1 RGB (来自文件), 0 DEPTH\n"
+              << "  - 图像缓冲区大小: " << camera->get_buf_len() << " bytes\n";
 
     // 配置设备引擎
     DeviceEngine::Options opts;
@@ -86,8 +86,8 @@ int main(int argc, char** argv) {
     opts.max_payload_bytes = 16 * 1024 * 1024;
     opts.listen_transport = DeviceEngine::Transport::SocketTcp;
 
-    SYLAR_LOG_INFO(g_logger) << "  - 发送间隔: " << opts.send_interval_ms << " ms";
-    SYLAR_LOG_INFO(g_logger) << "----------------------------------------";
+    std::cout << "  - 发送间隔: " << opts.send_interval_ms << " ms\n"
+              << "----------------------------------------\n";
 
     // 创建设备引擎
     g_device = std::make_shared<DeviceEngine>(opts, camera, io_mgr);
@@ -152,12 +152,12 @@ int main(int argc, char** argv) {
 
     // 启动设备
     if (!g_device->start()) {
-        SYLAR_LOG_ERROR(g_logger) << "设备启动失败";
+        std::cerr << "[ERROR] 设备启动失败\n";
         return 1;
     }
 
-    SYLAR_LOG_INFO(g_logger) << "设备已启动，正在连接服务器...";
-    SYLAR_LOG_INFO(g_logger) << "按 Ctrl+C 停止设备";
+    std::cout << "设备已启动，正在连接服务器...\n"
+              << "按 Ctrl+C 停止设备\n";
 
     // 主循环 - 打印状态
     auto last_print = std::chrono::steady_clock::now();
@@ -167,21 +167,21 @@ int main(int argc, char** argv) {
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_print);
         if (elapsed.count() >= 5) {
-            SYLAR_LOG_INFO(g_logger) << "[状态] 消息已发送: " << msg_sent 
-                                      << " 结果已接收: " << result_received;
+            std::cout << "[状态] 消息已发送: " << msg_sent
+                      << "  结果已接收: " << result_received << "\n";
             last_print = now;
         }
     }
 
     // 停止设备
-    SYLAR_LOG_INFO(g_logger) << "正在关闭设备...";
+    std::cout << "正在关闭设备...\n";
     g_device->stop();
     g_device.reset();
 
     // 停止 IOManager
     io_mgr->stop();
 
-    SYLAR_LOG_INFO(g_logger) << "设备客户端已停止";
-    SYLAR_LOG_INFO(g_logger) << "统计: 发送=" << msg_sent << " 接收=" << result_received;
+    std::cout << "设备客户端已停止\n"
+              << "统计: 发送=" << msg_sent << "  接收=" << result_received << "\n";
     return 0;
 }

@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     
     // vLLM配置 (Qwen3-VL-4B 模型)
     config->vllm.endpoint = "http://localhost:8000";
-    config->vllm.model = "Qwen/Qwen3-VL-4B";
+    config->vllm.model = "Qwen/Qwen3-VL-4B-Instruct";
     config->vllm.timeout_ms = 30000;
     config->vllm.max_tokens = 512;
     config->vllm.temperature = 0.7f;
