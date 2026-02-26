@@ -638,6 +638,7 @@ void VllmClient::doHttpRequestStream(VllmRequest::ptr request) {
         req->setHeader("Host",         m_vllmHost);
         req->setHeader("Content-Type", "application/json");
         req->setHeader("Accept",       "text/event-stream");
+        req->setHeader("Connection",   "keep-alive");  // 明确要求 vLLM 保持连接
         req->setBody(body);
 
         int rt = conn->sendRequest(req);
@@ -719,14 +720,14 @@ void VllmClient::doHttpAbort(const std::string& request_id) {
     // 尝试发送abort请求到vLLM(如果支持)
     // 注意: 标准OpenAI API不支持abort, 但vLLM可能有额外接口
     
-    std::string url = m_config.endpoint + "/v1/abort";
     std::map<std::string, std::string> headers;
     headers["Content-Type"] = "application/json";
     
     std::ostringstream body;
     body << "{\"request_id\":\"" << request_id << "\"}";
     
-    auto result = http::HttpConnection::DoPost(url, 5000, headers, body.str());
+    // 使用连接池发送 abort，避免每次都新建 TCP 连接
+    auto result = m_pool->doPost("/v1/abort", 5000, headers, body.str());
     
     if (result->result == 0 && 
         result->response->getStatus() == http::HttpStatus::OK) {
