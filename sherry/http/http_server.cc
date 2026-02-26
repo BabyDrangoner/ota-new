@@ -4,7 +4,7 @@
 namespace sherry{
 namespace http{
 
-static Logger::ptr g_logger = SYLAR_LOG_NAME("system");
+static Logger::ptr g_logger = SYLAR_LOG_NAME("http");
 
 HttpServer::HttpServer(bool keepalive
                       ,IOManager* worker

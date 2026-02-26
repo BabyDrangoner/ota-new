@@ -6,7 +6,7 @@
 namespace sherry{
 namespace http{
 
-static sherry::Logger::ptr g_logger = SYLAR_LOG_NAME("system");
+static sherry::Logger::ptr g_logger = SYLAR_LOG_NAME("http");
 
 HttpSession::HttpSession(Socket::ptr sock, bool owner)
     :SocketStream(sock, owner){

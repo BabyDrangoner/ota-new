@@ -44,6 +44,9 @@ int main(int argc, char** argv) {
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 
+    // 关闭 system logger 的 debug 噪音（hook/scheduler 等底层日志）
+    SYLAR_LOG_NAME("system")->setLevel((sherry::LogLevel::Level)100);
+
     SYLAR_LOG_INFO(g_logger) << "========================================";
     SYLAR_LOG_INFO(g_logger) << "       ICP Server 启动程序";
     SYLAR_LOG_INFO(g_logger) << "========================================";
