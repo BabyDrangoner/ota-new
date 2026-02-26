@@ -216,6 +216,7 @@ void on_response_http_field(void* data, const char* field, size_t flen
 HttpResponseParser::HttpResponseParser()
     :m_error(0){
     m_data.reset(new sherry::http::HttpResponse);
+    memset(&m_parser, 0, sizeof(m_parser));
     httpclient_parser_init(&m_parser);
     m_parser.reason_phrase = on_response_reason;
     m_parser.status_code = on_response_staus;
@@ -223,6 +224,7 @@ HttpResponseParser::HttpResponseParser()
     m_parser.http_version = on_response_version;
     m_parser.header_done = on_response_header_done;
     m_parser.http_field = on_response_http_field;
+    m_parser.last_chunk = nullptr;
     m_parser.data = this;
 }
 
