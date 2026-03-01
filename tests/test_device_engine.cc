@@ -154,10 +154,8 @@ int main() {
     opt.send_interval_ms = 1000;
     opt.car_id = 12345;  // 设置测试用车辆ID
 
-    auto camera = std::make_shared<sherry::device::SingleCamera>(
-        1, 0,
-        "/root/xxl/workspace/ota-new/file/ota_1_1.0.01_gps.jpg",
-        "");
+    auto camera = std::make_shared<sherry::device::NaviCamera>(
+        "/root/xxl/workspace/ota-new/file/navi_data/common");
 
     auto engine = std::make_shared<sherry::device::DeviceEngine>(opt, camera);
     engine->setServerMessageCallback([](const std::string& msg) {

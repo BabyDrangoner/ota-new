@@ -2,6 +2,8 @@
 #include "sherry/log.h"
 #include <fstream>
 #include <cstring>
+#include <filesystem>
+#include <algorithm>
 
 namespace sherry {
 namespace device {
@@ -128,6 +130,107 @@ int SingleCamera::make_images(char* buf, size_t buf_size) {
                                << "total bytes: " << (ptr - buf);
     
     return 0;  // 成功
+}
+
+// ====================================================================================
+// NaviCamera Implementation
+// ====================================================================================
+
+NaviCamera::NaviCamera(const std::string& dir)
+    : m_index(0)
+    , m_max_buf_len(0) {
+
+    namespace fs = std::filesystem;
+
+    // 扫描目录下所有 .jpg 文件
+    std::vector<std::pair<int, std::string>> numbered_files;
+    try {
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            if (!entry.is_regular_file()) continue;
+            const auto& path = entry.path();
+            if (path.extension() != ".jpg" && path.extension() != ".JPG" &&
+                path.extension() != ".jpeg" && path.extension() != ".JPEG") continue;
+
+            // 尝试将文件名（去掉扩展名）解析为整数，用于数字排序
+            std::string stem = path.stem().string();
+            try {
+                int num = std::stoi(stem);
+                numbered_files.emplace_back(num, path.string());
+            } catch (...) {
+                // 非纯数字文件名：放到最后，按字典序
+                numbered_files.emplace_back(INT_MAX, path.string());
+            }
+        }
+    } catch (const std::exception& e) {
+        SYLAR_LOG_ERROR(g_logger) << "[NaviCamera] failed to scan directory: " 
+                                   << dir << " : " << e.what();
+    }
+
+    // 按数字（或字典序）排序
+    std::sort(numbered_files.begin(), numbered_files.end(),
+              [](const auto& a, const auto& b) {
+                  if (a.first != b.first) return a.first < b.first;
+                  return a.second < b.second;
+              });
+
+    // 提取路径列表，同时预扫描最大文件大小
+    size_t max_image_size = 0;
+    for (const auto& [num, fpath] : numbered_files) {
+        m_files.push_back(fpath);
+        try {
+            size_t fsz = static_cast<size_t>(fs::file_size(fpath));
+            if (fsz > max_image_size) max_image_size = fsz;
+        } catch (...) {}
+    }
+
+    m_max_buf_len = sizeof(image_header) + max_image_size;
+
+    SYLAR_LOG_INFO(g_logger) << "[NaviCamera] scanned dir=" << dir
+                              << ", found=" << m_files.size() << " images"
+                              << ", max_image_size=" << max_image_size
+                              << ", buf_len=" << m_max_buf_len;
+}
+
+int NaviCamera::make_images(char* buf, size_t buf_size) {
+    if (m_files.empty()) {
+        SYLAR_LOG_WARN(g_logger) << "[NaviCamera] no images available";
+        return 1;
+    }
+
+    // 原子地取出当前序号并递增（循环）
+    size_t idx = m_index.fetch_add(1, std::memory_order_relaxed) % m_files.size();
+    const std::string& fpath = m_files[idx];
+
+    // 读取图片文件
+    std::ifstream ifs(fpath, std::ios::binary | std::ios::ate);
+    if (!ifs.is_open()) {
+        SYLAR_LOG_ERROR(g_logger) << "[NaviCamera] cannot open image: " << fpath;
+        return 1;
+    }
+    size_t image_size = static_cast<size_t>(ifs.tellg());
+    ifs.seekg(0, std::ios::beg);
+
+    if (buf_size < sizeof(image_header) + image_size) {
+        SYLAR_LOG_WARN(g_logger) << "[NaviCamera] buf_size(" << buf_size
+                                  << ") too small for image_size(" << image_size << ")";
+        return 1;
+    }
+
+    // 写入 image_header
+    image_header* header = reinterpret_cast<image_header*>(buf);
+    header->image_size = image_size;
+    header->type = ImageType::JPG;
+
+    // 写入图片数据
+    if (!ifs.read(buf + sizeof(image_header), static_cast<std::streamsize>(image_size))) {
+        SYLAR_LOG_ERROR(g_logger) << "[NaviCamera] failed to read image: " << fpath;
+        return 1;
+    }
+
+    SYLAR_LOG_DEBUG(g_logger) << "[NaviCamera] make_images idx=" << idx
+                               << " file=" << fpath
+                               << " size=" << image_size;
+    return 0;
 }
 
 } // namespace device

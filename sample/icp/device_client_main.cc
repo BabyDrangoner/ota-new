@@ -16,7 +16,6 @@
 #include <csignal>
 #include <atomic>
 #include <chrono>
-#include <fstream>
 #include <unistd.h>
 
 using namespace sherry;
@@ -39,12 +38,12 @@ int main(int argc, char** argv) {
     std::string server_ip = "127.0.0.1";
     uint16_t server_port = 8000;
     uint64_t car_id = 1;
-    std::string image_path = "file/ota_1_1.0.01_gps.jpg";  // 默认使用 file/ 目录下的图片
+    std::string navi_dir = "file/navi_data/common";  // 默认使用导航图片目录
 
     if (argc > 1) server_ip = argv[1];
     if (argc > 2) server_port = static_cast<uint16_t>(std::atoi(argv[2]));
     if (argc > 3) car_id = static_cast<uint64_t>(std::atoll(argv[3]));
-    if (argc > 4) image_path = argv[4];
+    if (argc > 4) navi_dir = argv[4];
 
     // 设置信号处理
     signal(SIGINT, signalHandler);
@@ -56,24 +55,21 @@ int main(int argc, char** argv) {
               << "配置:\n"
               << "  - 服务器地址: " << server_ip << ":" << server_port << "\n"
               << "  - 车辆ID: " << car_id << "\n"
-              << "  - 图片路径: " << image_path << "\n";
+              << "  - 导航图片目录: " << navi_dir << "\n";
 
     // 创建 IOManager
     auto io_mgr = std::make_shared<IOManager>(2, true, "device");
 
-    // 创建相机，加载 file/ 目录下的图片作为 RGB 输入 (无 DEPTH)
-    {
-        std::ifstream probe(image_path, std::ios::binary);
-        if (!probe.is_open()) {
-            char cwd_buf[4096] = {};
-            getcwd(cwd_buf, sizeof(cwd_buf));
-            std::cerr << "[ERROR] 图片文件不存在或无法打开: " << image_path
-                      << "  (当前工作目录: " << cwd_buf << ")\n";
-            return 1;
-        }
+    // 创建 NaviCamera，循环发送 navi_dir 目录下的 jpg 图片
+    auto camera = std::make_shared<NaviCamera>(navi_dir);
+    if (camera->total() == 0) {
+        char cwd_buf[4096] = {};
+        getcwd(cwd_buf, sizeof(cwd_buf));
+        std::cerr << "[ERROR] 导航图片目录为空或不存在: " << navi_dir
+                  << "  (当前工作目录: " << cwd_buf << ")\n";
+        return 1;
     }
-    auto camera = std::make_shared<SingleCamera>(1, 0, image_path);
-    std::cout << "  - 相机: 1 RGB (来自文件), 0 DEPTH\n"
+    std::cout << "  - 相机: NaviCamera (" << camera->total() << " 张图片循环)\n"
               << "  - 图像缓冲区大小: " << camera->get_buf_len() << " bytes\n";
 
     // 配置设备引擎
@@ -85,6 +81,7 @@ int main(int argc, char** argv) {
     opts.connect_timeout_ms = 5000;
     opts.max_payload_bytes = 16 * 1024 * 1024;
     opts.listen_transport = DeviceEngine::Transport::SocketTcp;
+    opts.images_per_msg = 1;       // 每条消息发送1张图片
 
     std::cout << "  - 发送间隔: " << opts.send_interval_ms << " ms\n"
               << "----------------------------------------\n";

@@ -72,26 +72,34 @@ std::vector<uint8_t> DeviceEngine::buildIcpMessage() {
         now.time_since_epoch()).count();
     builder.setTimestamp(static_cast<uint64_t>(ms));
     
-    // 解析相机输出，转换为 ICP 格式
-    // Camera 输出格式: [image_header(size_t + ImageType) + data] * N
-    const char* ptr = cam_buf.data();
-    const char* end = cam_buf.data() + cam_buf.size();
-    int image_count = m_camera->get_image_nums();
-    
-    for (int i = 0; i < image_count && ptr < end; ++i) {
-        // 读取 Camera 的 image_header
-        SingleCamera::image_header cam_header;
-        if (ptr + sizeof(cam_header) > end) {
-            break;
+    // 每条 ICP 消息打包 images_per_msg 张图片
+    // 每次调用 make_images() 从 Camera 取下一帧（NaviCamera 会自动循环递增）
+    int images_per_msg = m_opt.images_per_msg;
+    if (images_per_msg <= 0) images_per_msg = 1;
+
+    for (int i = 0; i < images_per_msg; ++i) {
+        // 每帧独立申请缓冲（大小固定为 cam_buf_size），复用已有 cam_buf
+        if (i > 0) {
+            // 后续帧：重置缓冲区并再次调用 make_images
+            std::fill(cam_buf.begin(), cam_buf.end(), 0);
+            int mk2 = m_camera->make_images(cam_buf.data(), cam_buf.size());
+            if (mk2 != 0) {
+                SYLAR_LOG_WARN(g_logger) << "[" << TAG << "] make_images failed at frame " << i;
+                break;
+            }
         }
+
+        // 解析单帧 Camera 输出: image_header + data
+        const char* ptr = cam_buf.data();
+        const char* end = cam_buf.data() + cam_buf.size();
+
+        SingleCamera::image_header cam_header;
+        if (ptr + sizeof(cam_header) > end) break;
         std::memcpy(&cam_header, ptr, sizeof(cam_header));
         ptr += sizeof(cam_header);
-        
-        // 读取图像数据
-        if (ptr + cam_header.image_size > end) {
-            break;
-        }
-        
+
+        if (cam_header.image_size == 0 || ptr + cam_header.image_size > end) break;
+
         // 转换图像类型：device::ImageType -> icp::ImageType
         icp::ImageType icp_type = icp::ImageType::UNKNOWN;
         switch (cam_header.type) {
@@ -106,11 +114,14 @@ std::vector<uint8_t> DeviceEngine::buildIcpMessage() {
                 icp_type = icp::ImageType::UNKNOWN;
                 break;
         }
-        
-        builder.addImage(icp_type, 
-                        reinterpret_cast<const uint8_t*>(ptr), 
-                        cam_header.image_size);
-        ptr += cam_header.image_size;
+
+        builder.addImage(icp_type,
+                         reinterpret_cast<const uint8_t*>(ptr),
+                         cam_header.image_size);
+
+        SYLAR_LOG_DEBUG(g_logger) << "[" << TAG << "] packed image[" << i
+                                   << "] size=" << cam_header.image_size
+                                   << " type=" << static_cast<int>(cam_header.type);
     }
     
     return builder.build();

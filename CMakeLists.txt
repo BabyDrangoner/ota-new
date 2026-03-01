@@ -183,6 +183,7 @@ add_sherry_executable(test_http_connection)
 add_sherry_executable(test_chunk_stream)
 add_sherry_executable(test_device_communicator)
 add_sherry_executable(test_device_camera)
+add_sherry_executable(test_navi_camera)
 add_sherry_executable(test_device_engine)
 
 # ICP 模块测试

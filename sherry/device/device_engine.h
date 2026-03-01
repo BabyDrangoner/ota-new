@@ -39,7 +39,8 @@ public:
         uint64_t send_interval_ms{1000};
         Transport listen_transport{Transport::SocketTcp};
         size_t max_payload_bytes{16 * 1024 * 1024};
-        uint64_t car_id{0};  // 车辆ID
+        uint64_t car_id{0};       // 车辆ID
+        int images_per_msg{4};    // 每条 ICP 消息打包的图片数量
     };
 
     DeviceEngine(Options opt, Camera::ptr camera, IOManager::ptr io_mgr = nullptr);

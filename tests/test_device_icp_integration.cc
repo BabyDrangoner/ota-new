@@ -38,6 +38,8 @@ static std::atomic<int> g_responses_sent{0};
 static std::mutex g_mutex;
 static std::condition_variable g_cv;
 
+static const std::string NAVI_DIR = "/root/xxl/workspace/ota-new/file/navi_data/common";
+
 /**
  * @brief 测试1: 基本连接和消息发送
  */
@@ -86,8 +88,8 @@ void test_basic_connection() {
     opt.send_interval_ms = 500;  // 每500ms发送一次
     opt.connect_timeout_ms = 3000;
     
-    // 创建模拟相机 (1张RGB图片, 无深度图)
-    auto camera = std::make_shared<SingleCamera>(1, 0);
+    // 创建 NaviCamera，循环发送 navi_data/common 目录下的图片
+    auto camera = std::make_shared<NaviCamera>(NAVI_DIR);
     
     auto engine = std::make_shared<DeviceEngine>(opt, camera);
     
@@ -205,7 +207,7 @@ void test_multiple_devices() {
         opt.car_id = 100 + i;
         opt.send_interval_ms = 500;
         
-        auto camera = std::make_shared<SingleCamera>(1, 0);
+        auto camera = std::make_shared<NaviCamera>(NAVI_DIR);
         auto engine = std::make_shared<DeviceEngine>(opt, camera);
         
         if (engine->start()) {
@@ -272,12 +274,8 @@ void test_real_image_send() {
     opt.car_id = 200;
     opt.send_interval_ms = 300;
     
-    // 尝试加载真实图片（如果存在）
-    auto camera = std::make_shared<SingleCamera>(
-        2, 1,  // 2张RGB + 1张深度图
-        "",    // RGB 图片路径（空表示使用空数据）
-        ""     // 深度图路径
-    );
+    // 使用 NaviCamera 发送真实图片
+    auto camera = std::make_shared<NaviCamera>(NAVI_DIR);
     
     auto engine = std::make_shared<DeviceEngine>(opt, camera);
     
